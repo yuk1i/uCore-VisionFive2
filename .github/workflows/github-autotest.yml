@@ -1,0 +1,16 @@
+name: auto-test
+
+on: 
+  push:
+
+jobs:
+  base-test:
+    runs-on: ubuntu-latest
+    container:
+        image: duskmoon/dev-env:ucore-ci
+    steps:
+      - uses: actions/checkout@v3
+      - run: git clone https://github.com/LearningOS/uCore-Tutorial-Checker-2023S.git ucore-tutorial-ci 
+      - run: git clone https://github.com/LearningOS/uCore-Tutorial-Test-2023S.git ucore-tutorial-ci/workplace/user
+      - run: cd ucore-tutorial-ci && make test CHAPTER=`echo ${GITHUB_REF##*/} | grep -oP 'ch\K[0-9]'`
+      
