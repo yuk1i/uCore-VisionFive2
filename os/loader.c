@@ -76,6 +76,8 @@ int bin_loader(uint64 start, uint64 end, struct proc *p)
 	p->trapframe->sp = p->ustack + USTACK_SIZE;
 	p->trapframe->epc = va_start;
 	p->max_page = PGROUNDUP(p->ustack + USTACK_SIZE - 1) / PAGE_SIZE;
+	p->program_brk = p->ustack + USTACK_SIZE;
+        p->heap_bottom = p->ustack + USTACK_SIZE;
 	p->state = RUNNABLE;
 	return 0;
 }

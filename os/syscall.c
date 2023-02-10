@@ -104,6 +104,16 @@ uint64 sys_set_priority(long long prio){
 }
 
 
+uint64 sys_sbrk(int n)
+{
+        uint64 addr;
+        struct proc *p = curr_proc();
+        addr = p->program_brk;
+        if(growproc(n) < 0)
+                return -1;
+        return addr;
+}
+
 extern char trap_page[];
 
 void syscall()
@@ -148,6 +158,9 @@ void syscall()
 	case SYS_spawn:
 		ret = sys_spawn(args[0]);
 		break;
+	case SYS_sbrk:
+                ret = sys_sbrk(args[0]);
+                break;
 	default:
 		ret = -1;
 		errorf("unknown syscall %d", id);
