@@ -211,7 +211,7 @@
 #define SYS_sendmsg 211
 #define SYS_recvmsg 212
 #define SYS_readahead 213
-#define SYS_brk 214
+#define SYS_sbrk 214
 #define SYS_munmap 215
 #define SYS_mremap 216
 #define SYS_add_key 217
