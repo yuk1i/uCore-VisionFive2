@@ -12,5 +12,5 @@ jobs:
       - uses: actions/checkout@v3
       - run: git clone https://github.com/LearningOS/uCore-Tutorial-Checker-2023S.git ucore-tutorial-ci 
       - run: git clone https://github.com/LearningOS/uCore-Tutorial-Test-2023S.git ucore-tutorial-ci/workplace/user
-      - run: cd ucore-tutorial-ci && make test CHAPTER=`echo ${GITHUB_REF##*/} | grep -oP 'ch\K[0-9]'`
+      - run: cd ucore-tutorial-ci && make test passwd=${{ secrets.BASE_TEST_TOKEN }} CHAPTER=`echo ${GITHUB_REF##*/} | grep -oP 'ch\K[0-9]'`
       
