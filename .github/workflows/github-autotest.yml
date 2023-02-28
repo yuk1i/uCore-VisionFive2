@@ -21,6 +21,7 @@ jobs:
         id: end
         run: cat output.txt | grep "Test passed" | grep -oP "\d{1,}/\d{1,}" | xargs -i echo "points={}" >> $GITHUB_OUTPUT
   deploy:
+    if: github.repository != 'LearningOS/uCore-Tutorial-Code-2023S'
     name: Deploy to pages
     needs: base-test
     runs-on: ubuntu-latest
