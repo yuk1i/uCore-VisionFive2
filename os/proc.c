@@ -84,6 +84,8 @@ found:
 	p->parent = NULL;
 	p->exit_code = 0;
 	p->pagetable = uvmcreate((uint64)p->trapframe);
+	p->program_brk = 0;
+        p->heap_bottom = 0;
 	memset(&p->context, 0, sizeof(p->context));
 	memset((void *)p->kstack, 0, KSTACK_SIZE);
 	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
@@ -250,4 +252,26 @@ void exit(int code)
 		}
 	}
 	sched();
+}
+
+// Grow or shrink user memory by n bytes.
+// Return 0 on succness, -1 on failure.
+int growproc(int n)
+{
+        uint64 program_brk;
+        struct proc *p = curr_proc();
+        program_brk = p->program_brk;
+        int new_brk = program_brk + n - p->heap_bottom;
+        if(new_brk < 0){
+                return -1;
+        }
+        if(n > 0){
+                if((program_brk = uvmalloc(p->pagetable, program_brk, program_brk + n, PTE_W)) == 0) {
+                        return -1;
+                }
+        } else if(n < 0){
+                program_brk = uvmdealloc(p->pagetable, program_brk, program_brk + n);
+        }
+        p->program_brk = program_brk;
+        return 0;
 }
