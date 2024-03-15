@@ -35,6 +35,7 @@ int console_getchar()
 
 void shutdown()
 {
+	while(1) asm volatile("nop" ::: "memory");
 	sbi_call(SBI_SHUTDOWN, 0, 0, 0);
 }
 

@@ -1,6 +1,7 @@
     .section .text.entry
     .globl _entry
 _entry:
+    fence.i
     la sp, boot_stack_top
     call main
 

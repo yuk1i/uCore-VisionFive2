@@ -22,6 +22,7 @@ void freerange(void *pa_start, void *pa_end)
 
 void kinit()
 {
+	infof("kinit: ekernel: %p, phy_stop: %p", ekernel, (void*)PHYSTOP);
 	freerange(ekernel, (void *)PHYSTOP);
 }
 
@@ -36,6 +37,7 @@ void kfree(void *pa)
 	    (uint64)pa >= PHYSTOP)
 		panic("kfree");
 	// Fill with junk to catch dangling refs.
+	infof("%p", pa);
 	memset(pa, 1, PGSIZE);
 	l = (struct linklist *)pa;
 	l->next = kmem.freelist;
@@ -53,5 +55,6 @@ void *kalloc()
 		kmem.freelist = l->next;
 		memset((char *)l, 5, PGSIZE); // fill with junk
 	}
+	infof("%p", l);
 	return (void *)l;
 }

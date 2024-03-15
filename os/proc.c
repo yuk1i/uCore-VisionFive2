@@ -16,6 +16,7 @@ struct queue task_queue;
 
 int threadid()
 {
+	if (!current_proc) return -1;
 	return curr_proc()->pid;
 }
 

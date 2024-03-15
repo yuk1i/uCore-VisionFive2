@@ -1,7 +1,9 @@
 set confirm off
+source /data/os-riscv/gef/gef.py
 set architecture riscv:rv64
-target remote 127.0.0.1:15234
-symbol-file build/kernel
-display/12i $pc-8
+file build/kernel
+gef config context.show_registers_raw 1
+#target remote 127.0.0.1:3333
+gef-remote --qemu-user --qemu-binary build/kernel 127.0.0.1 3333
 set riscv use-compressed-breakpoints yes
-break *0x1000
+b *0x80200000

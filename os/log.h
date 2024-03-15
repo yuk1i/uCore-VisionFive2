@@ -6,6 +6,9 @@ extern int threadid();
 extern void dummy(int, ...);
 extern void shutdown();
 
+// debug: force trace level
+#define LOG_LEVEL_TRACE
+
 #if defined(LOG_LEVEL_ERROR)
 
 #define USE_LOG_ERROR
@@ -80,7 +83,7 @@ enum LOG_COLOR {
 #define infof(fmt, ...)                                                        \
 	do {                                                                   \
 		int tid = threadid();                                          \
-		printf("\x1b[%dm[%s %d]" fmt "\x1b[0m\n", BLUE, "INFO", tid,   \
+		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", BLUE, "INFO", tid, __func__,   \
 		       ##__VA_ARGS__);                                         \
 	} while (0)
 #else
@@ -91,7 +94,7 @@ enum LOG_COLOR {
 #define debugf(fmt, ...)                                                       \
 	do {                                                                   \
 		int tid = threadid();                                          \
-		printf("\x1b[%dm[%s %d]" fmt "\x1b[0m\n", GREEN, "DEBUG", tid, \
+		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", GREEN, "DEBUG", tid, __func__, \
 		       ##__VA_ARGS__);                                         \
 	} while (0)
 #else

@@ -14,13 +14,21 @@ void clean_bss()
 void main()
 {
 	clean_bss();
+	extern char e_text[]; // kernel.ld sets this to end of kernel code.
+	printf("etext: %p\n", e_text);
 	printf("hello world!\n");
 	proc_init();
+	printf("hello world!\n");
 	kinit();
-	kvm_init();
-	loader_init();
 	trap_init();
+	printf("hello world!\n");
+	kvm_init();
+	printf("hello world!\n");
+	loader_init();
+	printf("hello world!\n");
+	printf("hello world!\n");
 	timer_init();
+	printf("hello world!\n");
 	load_init_app();
 	infof("start scheduler!");
 	scheduler();

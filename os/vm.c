@@ -15,11 +15,24 @@ pagetable_t kvmmake()
 	memset(kpgtbl, 0, PGSIZE);
 	// map kernel text executable and read-only.
 	kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)e_text - KERNBASE,
-	       PTE_R | PTE_X);
+	       PTE_A | PTE_R | PTE_X);
+	// VisionFive2 Notes:
+	// 	if PTE_A is not set here, it will trigger an instruction page fault scause 0xc for the first time-accesses.
+	//		Then the trap-handler traps itself.
+	//		Because page fault handler should handle the PTE_A and PTE_D bits in VF2
+	//		QEMU works without PTE_A here.
+	//	see: https://www.reddit.com/r/RISCV/comments/14psii6/comment/jqmad6g
+	//	docs: Volume II: RISC-V Privileged Architectures V1.10, Page 61, 
+	//		> Two schemes to manage the A and D bits are permitted:
+	// 			- ..., the implementation sets the corresponding bit in the PTE.
+	//			- ..., a page-fault exception is raised.
+	//		> Standard supervisor software should be written to assume either or both PTE update schemes may be in effect.
+
 	// map kernel data and the physical RAM we'll make use of.
 	kvmmap(kpgtbl, (uint64)e_text, (uint64)e_text, PHYSTOP - (uint64)e_text,
-	       PTE_R | PTE_W);
+	       PTE_A | PTE_D | PTE_R | PTE_W);
 	kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+	vm_print(kpgtbl);
 	return kpgtbl;
 }
 
@@ -29,7 +42,11 @@ pagetable_t kvmmake()
 void kvm_init()
 {
 	kernel_pagetable = kvmmake();
-	w_satp(MAKE_SATP(kernel_pagetable));
+	asm volatile("fence");
+	asm volatile("fence.i");
+	uint64 satp = MAKE_SATP(kernel_pagetable);
+	asm volatile("sfence.vma");
+	asm volatile("csrw satp, %0" : : "r"(satp));
 	sfence_vma();
 	infof("enable pageing at %p", r_satp());
 }
@@ -126,6 +143,7 @@ int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 			return -1;
 		}
 		*pte = PA2PTE(pa) | perm | PTE_V;
+		sfence_vma();
 		if (a == last)
 			break;
 		a += PGSIZE;
@@ -336,27 +354,28 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 {
-        char *mem;
-        uint64 a;
+	char *mem;
+	uint64 a;
 
-        if(newsz < oldsz)
-                return oldsz;
+	if (newsz < oldsz)
+		return oldsz;
 
-        oldsz = PGROUNDUP(oldsz);
-        for(a = oldsz; a < newsz; a += PGSIZE){
-                mem = kalloc();
-                if(mem == 0){
-                        uvmdealloc(pagetable, a, oldsz);
-                        return 0;
-                }
-                memset(mem, 0, PGSIZE);
-                if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
-                        kfree(mem);
-                        uvmdealloc(pagetable, a, oldsz);
-                        return 0;
-                }
-        }
-        return newsz;
+	oldsz = PGROUNDUP(oldsz);
+	for (a = oldsz; a < newsz; a += PGSIZE) {
+		mem = kalloc();
+		if (mem == 0) {
+			uvmdealloc(pagetable, a, oldsz);
+			return 0;
+		}
+		memset(mem, 0, PGSIZE);
+		if (mappages(pagetable, a, PGSIZE, (uint64)mem,
+			     PTE_R | PTE_U | xperm) != 0) {
+			kfree(mem);
+			uvmdealloc(pagetable, a, oldsz);
+			return 0;
+		}
+	}
+	return newsz;
 }
 
 // Deallocate user pages to bring the process size from oldsz to
@@ -365,14 +384,48 @@ uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 // process size.  Returns the new process size.
 uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
-        if(newsz >= oldsz)
-                return oldsz;
+	if (newsz >= oldsz)
+		return oldsz;
 
-        if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
-                int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
-                uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
-        }
+	if (PGROUNDUP(newsz) < PGROUNDUP(oldsz)) {
+		int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+		uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+	}
 
-        return newsz;
+	return newsz;
 }
 
+// Debug function to print pagetable
+// Assume Sv39
+static void vm_print_walk(uint64 va, pagetable_t pgt, int level)
+{
+	for (uint64 i = 0; i < 512; i++) {
+		pte_t* pte = &((pte_t *)pgt)[i];
+		if (*pte & PTE_V) {
+			for (int j = 0; j < level; j++)
+				printf("  ");
+			uint64 iva = va | (i << (12 + 9 * (2 - level)));
+			printf("%d, %p: %p -> %p %c%c%c%c%c%c%c%c\n", i, pte, (void*)iva, PTE2PA(*pte), 
+				*pte & PTE_D ? 'D' : '-',
+				*pte & PTE_A ? 'A' : '-',
+				*pte & PTE_G ? 'G' : '-',
+				*pte & PTE_U ? 'U' : '-',
+				*pte & PTE_X ? 'X' : '-',
+				*pte & PTE_W ? 'W' : '-',
+				*pte & PTE_R ? 'R' : '-',
+				*pte & PTE_V ? 'V' : '-'
+			);
+			if (!((*pte & PTE_R) || (*pte & PTE_W) || (*pte & PTE_X))) {
+				// has next level;
+				vm_print_walk(iva, (pagetable_t)PTE2PA((uint64)*pte), level + 1);
+			}
+		}
+	}
+}
+
+void vm_print(pagetable_t pagetable)
+{
+	printf("=== PageTable at %p ===\n", pagetable);
+	vm_print_walk(0, pagetable, 0);
+	printf("=== END === \n");
+}
