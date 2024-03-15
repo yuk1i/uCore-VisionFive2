@@ -7,13 +7,35 @@
 extern char trampoline[], uservec[];
 extern char userret[];
 
-void kerneltrap() __attribute__((aligned(16)));
+void kerneltrap() __attribute__((aligned(16)))
+__attribute__((interrupt("supervisor")));
 
-void kerneltrap() 
+void kerneltrap()
 {
 	if ((r_sstatus() & SSTATUS_SPP) == 0)
 		panic("kerneltrap: not from supervisor mode");
-	panic("trap from kernel");
+
+	uint64 cause = r_scause();
+	if (cause & (1ULL << 63)) {
+		panic("kerneltrap enter with interrupt scause");
+	}
+	uint64 addr = r_stval();
+	pagetable_t pgt = SATP_TO_PGTABLE(r_satp());
+	pte_t *pte = walk(pgt, addr, 0);
+	if (pte == NULL)
+		panic("kernel pagefault at %p", addr);
+	switch (cause) {
+	case InstructionPageFault:
+	case LoadPageFault:
+		*pte |= PTE_A;
+		break;
+	case StorePageFault:
+		*pte |= PTE_A | PTE_D;
+		break;
+
+	default:
+		panic("trap from kernel");
+	}
 }
 
 // set up to take exceptions and traps while in the kernel.
@@ -24,7 +46,6 @@ void set_usertrap()
 
 void set_kerneltrap()
 {
-	infof("set stvec to %p", kerneltrap);
 	w_stvec((uint64)kerneltrap & ~0x3); // DIRECT
 }
 
@@ -72,12 +93,23 @@ void usertrap()
 			trapframe->epc += 4;
 			syscall();
 			break;
-		case StoreMisaligned:
-		case StorePageFault:
-		case InstructionMisaligned:
-		case InstructionPageFault:
-		case LoadMisaligned:
 		case LoadPageFault:
+		case StorePageFault:
+		case InstructionPageFault: {
+			uint64 addr = r_stval();
+			pagetable_t pgt = curr_proc()->pagetable;
+			pte_t *pte = walk(pgt, addr, 0);
+			if (pte != NULL && (*pte & PTE_V)) {
+				*pte |= PTE_A;
+				if (cause == StorePageFault)
+					*pte |= PTE_D;
+				sfence_vma();
+				break;
+			}
+		}
+		case StoreMisaligned:
+		case InstructionMisaligned:
+		case LoadMisaligned:
 			errorf("%d in application, bad addr = %p, bad instruction = %p, "
 			       "core dumped.",
 			       cause, r_stval(), trapframe->epc);

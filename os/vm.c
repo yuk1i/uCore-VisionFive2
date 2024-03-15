@@ -31,8 +31,8 @@ pagetable_t kvmmake()
 	// map kernel data and the physical RAM we'll make use of.
 	kvmmap(kpgtbl, (uint64)e_text, (uint64)e_text, PHYSTOP - (uint64)e_text,
 	       PTE_A | PTE_D | PTE_R | PTE_W);
-	kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
-	vm_print(kpgtbl);
+	kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_A | PTE_R | PTE_X);
+	// vm_print(kpgtbl);
 	return kpgtbl;
 }
 
@@ -190,10 +190,10 @@ pagetable_t uvmcreate(uint64 trapframe)
 	}
 	memset(pagetable, 0, PGSIZE);
 	if (mappages(pagetable, TRAMPOLINE, PAGE_SIZE, (uint64)trampoline,
-		     PTE_R | PTE_X) < 0) {
+		     PTE_A | PTE_R | PTE_X) < 0) {
 		panic("mappages fail");
 	}
-	if (mappages(pagetable, TRAPFRAME, PGSIZE, trapframe, PTE_R | PTE_W) <
+	if (mappages(pagetable, TRAPFRAME, PGSIZE, trapframe, PTE_A | PTE_D | PTE_R | PTE_W) <
 	    0) {
 		panic("mappages fail");
 	}

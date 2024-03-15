@@ -86,8 +86,8 @@ os/kernel_app.ld: scripts/kernelld.py .FORCE
 
 build: build/kernel
 
-build/kernel: $(OBJS) os/kernel.ld
-	$(LD) $(LDFLAGS) -T os/kernel.ld -o $(BUILDDIR)/kernel $(OBJS)
+build/kernel: $(OBJS) os/kernel_app.ld
+	$(LD) $(LDFLAGS) -T os/kernel_app.ld -o $(BUILDDIR)/kernel $(OBJS)
 	$(OBJCOPY) -O binary $(BUILDDIR)/kernel $(BUILDDIR)/kernel.bin
 	$(OBJDUMP) -S $(BUILDDIR)/kernel > $(BUILDDIR)/kernel.asm
 	$(OBJDUMP) -t $(BUILDDIR)/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(BUILDDIR)/kernel.sym
@@ -109,7 +109,6 @@ QEMU = qemu-system-riscv64
 QEMUOPTS = \
 	-nographic \
 	-machine virt \
-	-bios $(BOOTLOADER) \
 	-kernel build/kernel	\
 
 run: build/kernel

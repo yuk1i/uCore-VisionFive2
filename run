@@ -1,3 +1,9 @@
-setenv ipaddr 192.168.2.45
-setenv serverip 192.168.2.20
-tftpboot 0x60000000 192.168.2.20:kernel
+setenv ipaddr 192.168.20.45
+
+setenv serverip 192.168.20.20
+
+ping 192.168.20.20
+
+tftpboot 0x60000000 192.168.20.20:kernel
+
+bootelf

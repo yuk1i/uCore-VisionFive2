@@ -12,12 +12,15 @@ struct {
 	struct linklist *freelist;
 } kmem;
 
+int kfree_inited = 0;
+
 void freerange(void *pa_start, void *pa_end)
 {
 	char *p;
 	p = (char *)PGROUNDUP((uint64)pa_start);
 	for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE)
 		kfree(p);
+	kfree_inited = 1;
 }
 
 void kinit()
@@ -37,7 +40,8 @@ void kfree(void *pa)
 	    (uint64)pa >= PHYSTOP)
 		panic("kfree");
 	// Fill with junk to catch dangling refs.
-	infof("%p", pa);
+	if (kfree_inited)
+		infof("%p", pa);
 	memset(pa, 1, PGSIZE);
 	l = (struct linklist *)pa;
 	l->next = kmem.freelist;
