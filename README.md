@@ -34,7 +34,65 @@ This repo contains my fixes to uCore-Tutorial-Code for running it on a VisionFiv
 
 See VisionFive2 Notes in codes.
 
-# gdb & gef
+### Checklist
+
+- pagetable
+- interrupt
+- userspace
+- SMP
+
+### gdb & openocd
+
+This configuration uses a jlink. 
+
+- https://github.com/starfive-tech/edk2/wiki/How-to-flash-and-debug-with-JTAG#connect-to-visionfive-2
+- https://dram.page/p/visionfive-jtag-1/
+
+clone https://github.com/riscv-collab/riscv-openocd
+configure with: ` ./configure  --enable-verbose --prefix /data/os-riscv/vf2-debug --enable-ftdi  --enable-stlink --enable-ft232r   --enable-ftdi-cjtag  --enable-jtag_vpi --enable-jtag_dpi --enable-openjtag --enable-jlink --enable-cmsis-dap --enable-nulink`
+make && make install
+
+openocd conf:
+
+```
+gdb_memory_map disable
+
+# JTAG adapter setup
+adapter speed 20000
+adapter driver jlink
+transport select jtag
+
+set _CHIPNAME riscv
+jtag newtap $_CHIPNAME cpu0 -irlen 5
+jtag newtap $_CHIPNAME cpu1 -irlen 5
+set _TARGETNAME_1 $_CHIPNAME.cpu1
+set _TARGETNAME_2 $_CHIPNAME.cpu2
+set _TARGETNAME_3 $_CHIPNAME.cpu3
+set _TARGETNAME_4 $_CHIPNAME.cpu4
+
+target create $_TARGETNAME_1 riscv -chain-position $_CHIPNAME.cpu1 -coreid 1 -rtos hwthread
+#target create $_TARGETNAME_2 riscv -chain-position $_CHIPNAME.cpu1 -coreid 2
+#target create $_TARGETNAME_3 riscv -chain-position $_CHIPNAME.cpu1 -coreid 3
+#target create $_TARGETNAME_4 riscv -chain-position $_CHIPNAME.cpu1 -coreid 4
+
+#target smp $_TARGETNAME_1 $_TARGETNAME_2 $_TARGETNAME_3 $_TARGETNAME_4
+
+init
+```
+
+gdbinit:
+
+```
+set confirm off
+source /data/os-riscv/gef/gef.py
+set architecture riscv:rv64
+file build/kernel
+gef config context.show_registers_raw 1
+#target remote 127.0.0.1:3333
+gef-remote --qemu-user --qemu-binary build/kernel 127.0.0.1 3333
+set riscv use-compressed-breakpoints yes
+b *0x80200000
+```
 
 ### PageTable PTE_A and PTE_W
 
