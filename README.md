@@ -25,4 +25,29 @@ git clone https://github.com/LearningOS/uCore-Tutorial-Test-2022A.git user
 git clone git@github.com:LearningOS/uCore-Tutorial-Test-2022A.git user
 ```
 
-注意：`user` 已添加至 `.gitignore`，你无需将其提交，ci 也不会使用它
+注意：`user` 已添加至 `.gitignore`，你无需将其提交，ci 也不会使用它]
+
+
+## uCore for VisionFive2
+
+This repo contains my fixes to uCore-Tutorial-Code for running it on a VisionFive2 board.
+
+See VisionFive2 Notes in codes.
+
+# gdb & gef
+
+### PageTable PTE_A and PTE_W
+
+```c
+vm.c:kvmmake
+// 	if PTE_A is not set here, it will trigger an instruction page fault scause 0xc for the first time-accesses.
+//		Then the trap-handler traps itself.
+//		Because page fault handler should handle the PTE_A and PTE_D bits in VF2
+//		QEMU works without PTE_A here.
+//	see: https://www.reddit.com/r/RISCV/comments/14psii6/comment/jqmad6g
+//	docs: Volume II: RISC-V Privileged Architectures V1.10, Page 61, 
+//		> Two schemes to manage the A and D bits are permitted:
+// 			- ..., the implementation sets the corresponding bit in the PTE.
+//			- ..., a page-fault exception is raised.
+//		> Standard supervisor software should be written to assume either or both PTE update schemes may be in effect.
+```
