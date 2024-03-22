@@ -94,7 +94,7 @@ set riscv use-compressed-breakpoints yes
 b *0x80200000
 ```
 
-### PageTable PTE_A and PTE_W
+### PageTable PTE_A and PTE_D
 
 ```c
 vm.c:kvmmake
@@ -108,4 +108,97 @@ vm.c:kvmmake
 // 			- ..., the implementation sets the corresponding bit in the PTE.
 //			- ..., a page-fault exception is raised.
 //		> Standard supervisor software should be written to assume either or both PTE update schemes may be in effect.
+```
+
+为了使用 kerneltrap 处理 A/D bits 的 pagefault，需要对其做一定更改
+
+```c
+void kerneltrap() __attribute__((aligned(16)))
+__attribute__((interrupt("supervisor")));	// gcc will generate codes for context saving and restoring.
+
+void kerneltrap()
+{
+	if ((r_sstatus() & SSTATUS_SPP) == 0)
+		panic("kerneltrap: not from supervisor mode");
+
+	uint64 cause = r_scause();
+	if (cause & (1ULL << 63)) {
+		panic("kerneltrap enter with interrupt scause");
+	}
+	uint64 addr = r_stval();
+	pagetable_t pgt = SATP_TO_PGTABLE(r_satp());
+	pte_t *pte = walk(pgt, addr, 0);
+	if (pte == NULL)
+		panic("kernel pagefault at %p", addr);
+	switch (cause) {
+	case InstructionPageFault:
+	case LoadPageFault:
+		*pte |= PTE_A;
+		break;
+	case StorePageFault:
+		*pte |= PTE_A | PTE_D;
+		break;
+
+	default:
+		panic("trap from kernel");
+	}
+}
+```
+
+相关的ISA： svadu, https://github.com/riscvarchive/riscv-svadu, 已经被合并进 Privileged Specification.
+
+VisionFive2 没有处理 PTE 中 A/D bits 的硬件，需要使用 pagefault 来处理。而 QEMU 则实现了 svadu ，可以直接设置 A/D bits.
+
+为了保持 QEMU 和 VisionFive2 行为一致性方便调试，QEMU 中 svadu 可以通过 cpu flags 关掉：
+
+```
+QEMUOPTS = \
+	-nographic \
+	-machine virt \
+	-cpu rv64,svadu=off \
+	-kernel build/kernel	\
+```
+
+挂上 gdb 后通过 `info register menvcfg` 确认：
+
+```
+(qemu) gef➤  i r menvcfg 
+menvcfg        0x80000000000000f0       0x80000000000000f0
+```
+
+注1：menvcfg 是 rv-privileged spec v1.12 的东西，最新的 spec 文档需要在 https://github.com/riscv/riscv-isa-manual/releases/ 中下载。
+目前 "Privileged Specification version 20211203" 中并没有 menvcfg 的 ADUE 定义。
+
+注2：QEMU 中相关的源代码：
+
+target/riscv/cpu_helper.c: get_physical_address:
+
+```c
+    bool svade = riscv_cpu_cfg(env)->ext_svade;
+    bool svadu = riscv_cpu_cfg(env)->ext_svadu;
+    bool adue = svadu ? env->menvcfg & MENVCFG_ADUE : !svade;
+
+    /*
+     * If ADUE is enabled, set accessed and dirty bits.
+     * Otherwise raise an exception if necessary.
+     */
+    if (adue) {
+        updated_pte |= PTE_A | (access_type == MMU_DATA_STORE ? PTE_D : 0);
+    } else if (!(pte & PTE_A) ||
+               (access_type == MMU_DATA_STORE && !(pte & PTE_D))) {
+        return TRANSLATE_FAIL;
+    }
+```
+
+target/riscv/cpu_bits.h:
+
+```c
+/* Execution environment configuration bits */
+#define MENVCFG_FIOM                       BIT(0)
+#define MENVCFG_CBIE                       (3UL << 4)
+#define MENVCFG_CBCFE                      BIT(6)
+#define MENVCFG_CBZE                       BIT(7)
+#define MENVCFG_ADUE                       (1ULL << 61)
+#define MENVCFG_PBMTE                      (1ULL << 62)
+#define MENVCFG_STCE                       (1ULL << 63)
 ```

@@ -27,7 +27,7 @@ endif
 
 -include $(HEADER_DEP)
 
-CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb -march=rv64g
+CFLAGS = -Wall -Wno-unused-variable -Werror -O -fno-omit-frame-pointer -ggdb -march=rv64g
 CFLAGS += -MD
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
@@ -109,6 +109,7 @@ QEMU = qemu-system-riscv64
 QEMUOPTS = \
 	-nographic \
 	-machine virt \
+	-cpu rv64,svadu=off \
 	-kernel build/kernel	\
 
 run: build/kernel
@@ -116,13 +117,13 @@ run: build/kernel
 
 # QEMU's gdb stub command line changed in 0.11
 QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
-	then echo "-gdb tcp::15234"; \
-	else echo "-s -p 15234"; fi)
+	then echo "-gdb tcp::3333"; \
+	else echo "-s -p 3333"; fi)
 
 debug: build/kernel .gdbinit
-	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB) &
-	sleep 1
-	$(GDB)
+	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
+	# sleep 1
+	# $(GDB)
 
 CHAPTER ?= $(shell git rev-parse --abbrev-ref HEAD | grep -oP 'ch\K[0-9]')
 
