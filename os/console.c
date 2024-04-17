@@ -13,5 +13,9 @@ void console_init()
 
 int consgetc()
 {
-	return console_getchar();
+	int ret;
+	do {
+		ret = console_getchar();
+	} while (ret == -1);
+	return ret;
 }
