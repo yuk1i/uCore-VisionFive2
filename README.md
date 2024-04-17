@@ -49,8 +49,10 @@ This configuration uses a jlink.
 - https://dram.page/p/visionfive-jtag-1/
 
 clone https://github.com/riscv-collab/riscv-openocd
+
 configure with: ` ./configure  --enable-verbose --prefix /data/os-riscv/vf2-debug --enable-ftdi  --enable-stlink --enable-ft232r   --enable-ftdi-cjtag  --enable-jtag_vpi --enable-jtag_dpi --enable-openjtag --enable-jlink --enable-cmsis-dap --enable-nulink`
-make && make install
+
+`make && make install`
 
 openocd conf:
 
@@ -58,8 +60,11 @@ openocd conf:
 gdb_memory_map disable
 
 # JTAG adapter setup
-adapter speed 20000
 adapter driver jlink
+# adapter driver cmsis-dap
+# use cmsis-dap for muselab's nanoDAP debugger
+
+adapter speed 20000
 transport select jtag
 
 set _CHIPNAME riscv
@@ -76,6 +81,8 @@ target create $_TARGETNAME_1 riscv -chain-position $_CHIPNAME.cpu1 -coreid 1 -rt
 #target create $_TARGETNAME_4 riscv -chain-position $_CHIPNAME.cpu1 -coreid 4
 
 #target smp $_TARGETNAME_1 $_TARGETNAME_2 $_TARGETNAME_3 $_TARGETNAME_4
+
+# we only debug one core.
 
 init
 ```

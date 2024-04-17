@@ -1,54 +1,54 @@
 import os
 
-TARGET_DIR = "./user/target/bin/"
+TARGET_DIR = "./user/target/stripped/"
 
 import argparse
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('INIT_PROC', default="usershell")
-    args = parser.parse_args()
-
     f = open("os/link_app.S", mode="w")
     apps = os.listdir(TARGET_DIR)
     apps.sort()
     f.write(
-'''    .align 4
+'''
+    .align 8
     .section .data
-    .global _app_num
-_app_num:
-    .quad {}
-'''.format(len(apps))
+    .global user_apps
+user_apps:
+'''
     )
 
-    for (idx, _) in enumerate(apps):
-        f.write('    .quad app_{}_start\n'.format(idx))
-    f.write('    .quad app_{}_end\n'.format(len(apps) - 1))
-
-    f.write(
-'''
-    .global _app_names
-_app_names:
-''');
-
     for app in apps:
-        f.write("   .string \"" + app + "\"\n")
+        size = os.path.getsize(TARGET_DIR + app)
+        f.write(f'''
+    .quad .str_{app}
+    .quad .elf_{app}
+    .quad {size}
+'''
+        )
+    
+    # in the end, append a NULL structure.
+    f.write(
+f'''
+    .quad 0
+    .quad 0
+    .quad 0
+'''
+    )
 
+    # include apps elf file.
     f.write(
 '''
-    .global INIT_PROC
-INIT_PROC:
-    .string \"{0}\"
-'''.format(args.INIT_PROC));
-
-    for (idx, app) in enumerate(apps):
-        f.write(
+    .section .data.apps
 '''
-    .section .data.app{0}
-    .global app_{0}_start
-app_{0}_start:
-    .incbin "{1}"
-'''.format(idx, TARGET_DIR + app)
-        )
-    f.write('app_{}_end:\n\n'.format(len(apps) - 1))
+    )
+    for app in apps:
+        f.write(
+f'''
+.str_{app}:
+    .string "{app}"
+.align 8
+.elf_{app}:
+    .incbin "./user/target/stripped/{app}"
+'''
+    )
     f.close()

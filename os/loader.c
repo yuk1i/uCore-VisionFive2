@@ -1,104 +1,113 @@
 #include "loader.h"
 #include "defs.h"
 #include "trap.h"
-
-static int app_num;
-static uint64 *app_info_ptr;
-extern char _app_num[], _app_names[], INIT_PROC[];
-char names[MAX_APP_NUM][MAX_STR_LEN];
+#include "elf.h"
 
 // Get user progs' infomation through pre-defined symbol in `link_app.S`
 void loader_init()
 {
-	char *s;
-	app_info_ptr = (uint64 *)_app_num;
-	app_num = *app_info_ptr;
-	app_info_ptr++;
-	s = _app_names;
-	printf("app list:\n");
-	for (int i = 0; i < app_num; ++i) {
-		int len = strlen(s);
-		strncpy(names[i], (const char *)s, len);
-		s += len + 1;
-		printf("%s\n", names[i]);
+	printf("applist:\n");
+	for (struct user_app *app = user_apps; app->name != NULL; app++) {
+		printf("\t%s\n", app->name);
+		Elf64_Ehdr *ehdr = (Elf64_Ehdr *)app->elf_address;
+		assert_str(ehdr->e_ident[0] == 0x7F && ehdr->e_ident[1] == 'E' &&
+				   ehdr->e_ident[2] == 'L' && ehdr->e_ident[3] == 'F',
+			   "invalid elf header: %s", app->name);
+		assert_equals(ehdr->e_phentsize, sizeof(Elf64_Phdr), "invalid program header size");
 	}
 }
 
-int get_id_by_name(char *name)
+struct user_app *get_elf(char *name)
 {
-	for (int i = 0; i < app_num; ++i) {
-		if (strncmp(name, names[i], 100) == 0)
-			return i;
+	for (struct user_app *app = user_apps; app->name != NULL; app++) {
+		if (strncmp(name, app->name, strlen(name)) == 0)
+			return app;
 	}
-	warnf("Cannot find such app %s", name);
-	return -1;
+	return NULL;
 }
 
-int bin_loader(uint64 start, uint64 end, struct proc *p)
+int load_user_elf(struct user_app *app, struct proc *p)
 {
 	if (p == NULL || p->state == UNUSED)
 		panic("...");
-	void *page;
-	uint64 pa_start = PGROUNDDOWN(start);
-	uint64 pa_end = PGROUNDUP(end);
-	uint64 length = pa_end - pa_start;
-	uint64 va_start = BASE_ADDRESS;
-	uint64 va_end = BASE_ADDRESS + length;
-	for (uint64 va = va_start, pa = pa_start; pa < pa_end;
-	     va += PGSIZE, pa += PGSIZE) {
-		page = kalloc();
-		if (page == 0) {
-			panic("...");
+	Elf64_Ehdr *ehdr = (Elf64_Ehdr *)app->elf_address;
+	Elf64_Phdr *phdr_base = (Elf64_Phdr *)(app->elf_address + ehdr->e_phoff);
+	uint64 max_va_end = 0;
+	for (int i = 0; i < ehdr->e_phnum; i++) {
+		Elf64_Phdr *phdr = &phdr_base[i];
+		// we only load from PT_LOAD phdrs
+		if (phdr->p_type != PT_LOAD)
+			continue;
+		// resolve the permission of PTE for this phdr
+		int pte_perm = PTE_U;
+		if (phdr->p_flags & PF_R)
+			pte_perm |= PTE_R;
+		if (phdr->p_flags & PF_W)
+			pte_perm |= PTE_W;
+		if (phdr->p_flags & PF_X)
+			pte_perm |= PTE_X;
+
+		uint64 va = phdr->p_vaddr; // The ELF requests this phdr loaded to p_vaddr
+		uint64 va_end = PGROUNDUP(va + phdr->p_memsz);
+		uint64 file_off = 0;
+		uint64 file_remains = phdr->p_filesz;
+		while (va < va_end) {
+			// allocate a physical page, copy data from elf file.
+			void *page = kalloc();
+			if (!page)
+				panic("kalloc");
+			uint64 copy_size = MIN(file_remains, PGSIZE);
+			if (copy_size > 0) // p_memsz may be larger than p_filesz
+				memmove(page, (void*)(app->elf_address + phdr->p_offset + file_off), copy_size);
+			if (mappages(p->pagetable, va, PGSIZE, (uint64)page, pte_perm) != 0)
+				panic("mappages");
+			file_off += copy_size;
+			file_remains -= copy_size;
+			va += PGSIZE;
 		}
-		memmove(page, (const void *)pa, PGSIZE);
-		if (pa < start) {
-			memset(page, 0, start - va);
-		} else if (pa + PAGE_SIZE > end) {
-			memset(page + (end - pa), 0, PAGE_SIZE - (end - pa));
-		}
-		if (mappages(p->pagetable, va, PGSIZE, (uint64)page,
-			     PTE_U | PTE_R | PTE_W | PTE_X) != 0)
-			panic("...");
+		assert(file_remains == 0);
+		max_va_end = MAX(max_va_end, va_end);
 	}
-	// map ustack
-	p->ustack = va_end + PAGE_SIZE;
-	for (uint64 va = p->ustack; va < p->ustack + USTACK_SIZE;
-	     va += PGSIZE) {
-		page = kalloc();
-		if (page == 0) {
-			panic("...");
-		}
-		memset(page, 0, PGSIZE);
-		if (mappages(p->pagetable, va, PGSIZE, (uint64)page,
-			     PTE_U | PTE_R | PTE_W) != 0)
-			panic("...");
+
+	p->ustack = USTACK_START;
+	for (uint64 va = p->ustack; va < p->ustack + USTACK_SIZE; va += PGSIZE) {
+		void *page = kalloc();
+		if (!page)
+			panic("kalloc");
+		if (mappages(p->pagetable, va, PGSIZE, (uint64)page, PTE_U | PTE_R | PTE_W) != 0)
+			panic("mappages");
 	}
+	// setup trapframe
 	p->trapframe->sp = p->ustack + USTACK_SIZE;
-	p->trapframe->epc = va_start;
-	p->max_page = PGROUNDUP(p->ustack + USTACK_SIZE - 1) / PAGE_SIZE;
-	p->program_brk = p->ustack + USTACK_SIZE;
-        p->heap_bottom = p->ustack + USTACK_SIZE;
+	p->trapframe->epc = ehdr->e_entry;
+	p->max_page = PGROUNDUP(p->ustack + USTACK_SIZE - 1);
+	p->program_brk = p->heap_bottom = PGROUNDUP(max_va_end + PGSIZE);
 	p->state = RUNNABLE;
 	return 0;
 }
 
-int loader(int app_id, struct proc *p)
-{
-	return bin_loader(app_info_ptr[app_id], app_info_ptr[app_id + 1], p);
-}
+#ifndef INIT_PROC
+#warning INIT_PROC is not defined, use "usershell"
+#define INIT_PROC "usershell"
+#endif
 
 // load all apps and init the corresponding `proc` structure.
 int load_init_app()
 {
-	int id = get_id_by_name(INIT_PROC);
-	if (id < 0)
-		panic("Cannpt find INIT_PROC %s", INIT_PROC);
+	struct user_app *app = get_elf(INIT_PROC);
+	if (app == NULL) {
+		panic("fail to lookup init elf %s", INIT_PROC);
+	}
+
 	struct proc *p = allocproc();
 	if (p == NULL) {
 		panic("allocproc\n");
 	}
 	debugf("load init proc %s", INIT_PROC);
-	loader(id, p);
+
+	if (load_user_elf(app, p) < 0) {
+		panic("fail to load init elf.");
+	}
 	add_task(p);
 	return 0;
 }

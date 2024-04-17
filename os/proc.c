@@ -16,7 +16,8 @@ struct queue task_queue;
 
 int threadid()
 {
-	if (!current_proc) return -1;
+	if (!current_proc)
+		return -1;
 	return curr_proc()->pid;
 }
 
@@ -86,7 +87,7 @@ found:
 	p->exit_code = 0;
 	p->pagetable = uvmcreate((uint64)p->trapframe);
 	p->program_brk = 0;
-        p->heap_bottom = 0;
+	p->heap_bottom = 0;
 	memset(&p->context, 0, sizeof(p->context));
 	memset((void *)p->kstack, 0, KSTACK_SIZE);
 	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
@@ -193,13 +194,13 @@ int fork()
 
 int exec(char *name)
 {
-	int id = get_id_by_name(name);
-	if (id < 0)
+	struct user_app *app = get_elf(name);
+	if (app == NULL)
 		return -1;
 	struct proc *p = curr_proc();
 	uvmunmap(p->pagetable, 0, p->max_page, 1);
 	p->max_page = 0;
-	loader(id, p);
+	load_user_elf(app, p);
 	return 0;
 }
 
@@ -259,20 +260,22 @@ void exit(int code)
 // Return 0 on succness, -1 on failure.
 int growproc(int n)
 {
-        uint64 program_brk;
-        struct proc *p = curr_proc();
-        program_brk = p->program_brk;
-        int new_brk = program_brk + n - p->heap_bottom;
-        if(new_brk < 0){
-                return -1;
-        }
-        if(n > 0){
-                if((program_brk = uvmalloc(p->pagetable, program_brk, program_brk + n, PTE_W)) == 0) {
-                        return -1;
-                }
-        } else if(n < 0){
-                program_brk = uvmdealloc(p->pagetable, program_brk, program_brk + n);
-        }
-        p->program_brk = program_brk;
-        return 0;
+	uint64 program_brk;
+	struct proc *p = curr_proc();
+	program_brk = p->program_brk;
+	int new_brk = program_brk + n - p->heap_bottom;
+	if (new_brk < 0) {
+		return -1;
+	}
+	if (n > 0) {
+		if ((program_brk = uvmalloc(p->pagetable, program_brk,
+					    program_brk + n, PTE_W)) == 0) {
+			return -1;
+		}
+	} else if (n < 0) {
+		program_brk =
+			uvmdealloc(p->pagetable, program_brk, program_brk + n);
+	}
+	p->program_brk = program_brk;
+	return 0;
 }

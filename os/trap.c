@@ -92,6 +92,7 @@ void usertrap()
 	set_kerneltrap();
 	struct trapframe *trapframe = curr_proc()->trapframe;
 	tracef("trap from user epc = %p", trapframe->epc);
+	// print_trapframe(trapframe);
 	if ((r_sstatus() & SSTATUS_SPP) != 0)
 		panic("usertrap: not from user mode");
 
@@ -119,6 +120,7 @@ void usertrap()
 		case InstructionPageFault: {
 			uint64 addr = r_stval();
 			pagetable_t pgt = curr_proc()->pagetable;
+			// vm_print(pgt);
 			pte_t *pte = walk(pgt, addr, 0);
 			if (pte != NULL && (*pte & PTE_V)) {
 				*pte |= PTE_A;

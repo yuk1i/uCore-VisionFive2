@@ -32,6 +32,7 @@ CFLAGS += -MD
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
 CFLAGS += -I$K
+CFLAGS += -std=gnu17
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
 
@@ -48,6 +49,9 @@ CFLAGS += -D LOG_LEVEL_DEBUG
 else ifeq ($(LOG), trace)
 CFLAGS += -D LOG_LEVEL_TRACE
 endif
+
+INIT_PROC ?= usershell
+CFLAGS += -DINIT_PROC=\"$(INIT_PROC)\"
 
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
@@ -72,22 +76,18 @@ $(C_OBJS): $(BUILDDIR)/$K/%.o : $K/%.c  $(BUILDDIR)/$K/%.d
 
 $(HEADER_DEP): $(BUILDDIR)/$K/%.d : $K/%.c
 	@mkdir -p $(@D)
-	@set -e; rm -f $@; $(CC) -MM $< $(INCLUDEFLAGS) > $@.$$$$; \
+	@set -e; rm -f $@; $(CC) -MM $< $(CFLAGS) > $@.$$$$; \
         sed 's,\($*\)\.o[ :]*,\1.o $@ : ,g' < $@.$$$$ > $@; \
         rm -f $@.$$$$
 
-INIT_PROC ?= usershell
-
 os/link_app.o: $K/link_app.S
 os/link_app.S: scripts/pack.py .FORCE
-	@$(PY) scripts/pack.py $(INIT_PROC)
-os/kernel_app.ld: scripts/kernelld.py .FORCE
-	@$(PY) scripts/kernelld.py
+	@$(PY) scripts/pack.py
 
 build: build/kernel
 
-build/kernel: $(OBJS) os/kernel_app.ld
-	$(LD) $(LDFLAGS) -T os/kernel_app.ld -o $(BUILDDIR)/kernel $(OBJS)
+build/kernel: $(OBJS) os/kernel.ld
+	$(LD) $(LDFLAGS) -T os/kernel.ld -o $(BUILDDIR)/kernel $(OBJS)
 	$(OBJCOPY) -O binary $(BUILDDIR)/kernel $(BUILDDIR)/kernel.bin
 	$(OBJDUMP) -S $(BUILDDIR)/kernel > $(BUILDDIR)/kernel.asm
 	$(OBJDUMP) -t $(BUILDDIR)/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(BUILDDIR)/kernel.sym

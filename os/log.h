@@ -7,7 +7,7 @@ extern void dummy(int, ...);
 extern void shutdown();
 
 // debug: force trace level
-#define LOG_LEVEL_TRACE
+// #define LOG_LEVEL_TRACE
 
 #if defined(LOG_LEVEL_ERROR)
 
@@ -83,8 +83,8 @@ enum LOG_COLOR {
 #define infof(fmt, ...)                                                        \
 	do {                                                                   \
 		int tid = threadid();                                          \
-		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", BLUE, "INFO", tid, __func__,   \
-		       ##__VA_ARGS__);                                         \
+		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", BLUE, "INFO",    \
+		       tid, __func__, ##__VA_ARGS__);                          \
 	} while (0)
 #else
 #define infof(fmt, ...) dummy(0, ##__VA_ARGS__)
@@ -94,8 +94,8 @@ enum LOG_COLOR {
 #define debugf(fmt, ...)                                                       \
 	do {                                                                   \
 		int tid = threadid();                                          \
-		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", GREEN, "DEBUG", tid, __func__, \
-		       ##__VA_ARGS__);                                         \
+		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", GREEN, "DEBUG",  \
+		       tid, __func__, ##__VA_ARGS__);                          \
 	} while (0)
 #else
 #define debugf(fmt, ...) dummy(0, ##__VA_ARGS__)
@@ -119,5 +119,33 @@ enum LOG_COLOR {
 		       "PANIC", tid, __FILE__, __LINE__, ##__VA_ARGS__);       \
 		shutdown();                                                    \
 	} while (0)
+
+#define assert(x)                                                              \
+	do {                                                                   \
+		if (!(x))                                                      \
+			panic("assertion failed: %s", #x);                     \
+	} while (0)
+
+#define assert_str(x, fmt, ...)                                                \
+	do {                                                                   \
+		if (!(x))                                                      \
+			panic("assertion failed: %s, " fmt, #x,                \
+			      ##__VA_ARGS__);                                  \
+	} while (0)
+
+#define assert_equals(expecteds, actuals, fmt, ...)                                        \
+	do {                                                                          \
+		typeof(expecteds) _exp = (expecteds);                                 \
+		typeof(actuals) _act = (actuals);                                     \
+		if (_exp != _act) {                                                   \
+			panic("expectation failed: %s != %s, expected: %lx actuals: %lx" fmt, \
+			      #expecteds, #actuals, _exp, _act, ##__VA_ARGS__);                   \
+		}                                                                     \
+	} while (0)
+
+#define static_assert(x)                                                       \
+	switch (x)                                                             \
+	case 0:                                                                \
+	case (x):;
 
 #endif //! LOG_H
