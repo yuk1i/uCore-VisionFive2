@@ -82,12 +82,10 @@ found:
 	p->pid = allocpid();
 	p->state = USED;
 	p->ustack = 0;
-	p->max_page = 0;
 	p->parent = NULL;
 	p->exit_code = 0;
 	p->pagetable = uvmcreate((uint64)p->trapframe);
 	p->program_brk = 0;
-	p->heap_bottom = 0;
 	memset(&p->context, 0, sizeof(p->context));
 	memset((void *)p->kstack, 0, KSTACK_SIZE);
 	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
@@ -164,7 +162,7 @@ void freepagetable(pagetable_t pagetable, uint64 max_page)
 void freeproc(struct proc *p)
 {
 	if (p->pagetable)
-		freepagetable(p->pagetable, p->max_page);
+		freepagetable(p->pagetable, PGROUNDUP(p->program_brk) / PGSIZE);
 	p->pagetable = 0;
 	p->state = UNUSED;
 }
@@ -174,14 +172,14 @@ int fork()
 	struct proc *np;
 	struct proc *p = curr_proc();
 	// Allocate process.
-	if ((np = allocproc()) == 0) {
+	if ((np = allocproc()) == NULL) {
 		panic("allocproc\n");
 	}
 	// Copy user memory from parent to child.
-	if (uvmcopy(p->pagetable, np->pagetable, p->max_page) < 0) {
+	if (uvmcopy(p->pagetable, np->pagetable, PGROUNDUP(p->program_brk) / PGSIZE) < 0) {
 		panic("uvmcopy\n");
 	}
-	np->max_page = p->max_page;
+	np->program_brk = p->program_brk;
 	// copy saved user registers.
 	*(np->trapframe) = *(p->trapframe);
 	// Cause fork to return 0 in the child.
@@ -198,8 +196,7 @@ int exec(char *name)
 	if (app == NULL)
 		return -1;
 	struct proc *p = curr_proc();
-	uvmunmap(p->pagetable, 0, p->max_page, 1);
-	p->max_page = 0;
+	uvmunmap(p->pagetable, 0, PGROUNDUP(p->program_brk) / PGSIZE, 1);
 	load_user_elf(app, p);
 	return 0;
 }
@@ -263,18 +260,17 @@ int growproc(int n)
 	uint64 program_brk;
 	struct proc *p = curr_proc();
 	program_brk = p->program_brk;
-	int new_brk = program_brk + n - p->heap_bottom;
+	int new_brk = program_brk + n;
 	if (new_brk < 0) {
 		return -1;
 	}
 	if (n > 0) {
-		if ((program_brk = uvmalloc(p->pagetable, program_brk,
-					    program_brk + n, PTE_W)) == 0) {
+		if ((program_brk = uvmalloc(p->pagetable, program_brk, program_brk + n, PTE_W)) ==
+		    0) {
 			return -1;
 		}
 	} else if (n < 0) {
-		program_brk =
-			uvmdealloc(p->pagetable, program_brk, program_brk + n);
+		program_brk = uvmdealloc(p->pagetable, program_brk, program_brk + n);
 	}
 	p->program_brk = program_brk;
 	return 0;

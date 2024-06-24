@@ -4,7 +4,7 @@
 extern void printf(char *, ...);
 extern int threadid();
 extern void dummy(int, ...);
-extern void shutdown();
+extern void shutdown() __attribute__((noreturn));
 
 // debug: force trace level
 // #define LOG_LEVEL_TRACE

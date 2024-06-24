@@ -80,8 +80,7 @@ int load_user_elf(struct user_app *app, struct proc *p)
 	// setup trapframe
 	p->trapframe->sp = p->ustack + USTACK_SIZE;
 	p->trapframe->epc = ehdr->e_entry;
-	p->max_page = PGROUNDUP(p->ustack + USTACK_SIZE - 1);
-	p->program_brk = p->heap_bottom = PGROUNDUP(max_va_end + PGSIZE);
+	p->program_brk = MAX(PGROUNDUP(p->ustack + USTACK_SIZE), PGROUNDUP(max_va_end + PGSIZE));
 	p->state = RUNNABLE;
 	return 0;
 }

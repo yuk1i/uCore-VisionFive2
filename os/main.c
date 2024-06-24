@@ -16,19 +16,18 @@ void main()
 	clean_bss();
 	extern char e_text[]; // kernel.ld sets this to end of kernel code.
 	printf("etext: %p\n", e_text);
-	printf("hello world!\n");
+	printf("Kernel is initializing...\n");
 	proc_init();
-	printf("hello world!\n");
+	printf("proc_init done!\n");
 	kinit();
 	trap_init();
-	printf("hello world!\n");
+	printf("trap_init done!\n");
 	kvm_init();
-	printf("hello world!\n");
+	printf("kvm_init done!\n");
 	loader_init();
-	printf("hello world!\n");
-	printf("hello world!\n");
+	printf("loader done!\n");
 	timer_init();
-	printf("hello world!\n");
+	printf("timer_init done!\n");
 	load_init_app();
 	infof("start scheduler!");
 	scheduler();
