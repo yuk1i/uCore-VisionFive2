@@ -13,17 +13,19 @@ PY = python3
 GDB = $(TOOLPREFIX)gdb
 CP = cp
 BUILDDIR = build
-C_SRCS = $(wildcard $K/*.c)
-AS_SRCS = $(wildcard $K/*.S)
+C_SRCS := $(wildcard $K/*.c)
+AS_SRCS := $(wildcard $K/*.S)
+
+ifeq (,$(findstring $K/link_app.S,$(AS_SRCS)))
+    AS_SRCS += $K/link_app.S
+endif
+
 C_OBJS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(C_SRCS))))
 AS_OBJS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(AS_SRCS))))
-OBJS = $(C_OBJS) $(AS_OBJS)
+OBJS := $(C_OBJS) $(AS_OBJS)
 
 HEADER_DEP = $(addsuffix .d, $(basename $(C_OBJS)))
 
-ifeq (,$(findstring link_app.o,$(OBJS)))
-	AS_OBJS += $(BUILDDIR)/$K/link_app.o
-endif
 
 -include $(HEADER_DEP)
 
@@ -80,9 +82,8 @@ $(HEADER_DEP): $(BUILDDIR)/$K/%.d : $K/%.c
         sed 's,\($*\)\.o[ :]*,\1.o $@ : ,g' < $@.$$$$ > $@; \
         rm -f $@.$$$$
 
-os/link_app.o: $K/link_app.S
-os/link_app.S: scripts/pack.py .FORCE
-	@$(PY) scripts/pack.py
+$K/link_app.S: scripts/pack.py .FORCE
+	$(PY) scripts/pack.py
 
 build: build/kernel
 
