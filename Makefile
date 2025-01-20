@@ -13,23 +13,22 @@ PY = python3
 GDB = $(TOOLPREFIX)gdb
 CP = cp
 BUILDDIR = build
-C_SRCS := $(wildcard $K/*.c)
+C_SRCS := $(wildcard $K/*.c) $(wildcard $K/drivers/*.c)
 AS_SRCS := $(wildcard $K/*.S)
 
 ifeq (,$(findstring $K/link_app.S,$(AS_SRCS)))
     AS_SRCS += $K/link_app.S
 endif
 
-C_OBJS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(C_SRCS))))
-AS_OBJS = $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(AS_SRCS))))
-OBJS := $(C_OBJS) $(AS_OBJS)
+C_OBJS  := $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(C_SRCS))))
+AS_OBJS := $(addprefix $(BUILDDIR)/, $(addsuffix .o, $(basename $(AS_SRCS))))
+OBJS 	:= $(C_OBJS) $(AS_OBJS)
 
-HEADER_DEP = $(addsuffix .d, $(basename $(C_OBJS)))
-
+HEADER_DEP := $(addsuffix .d, $(basename $(C_OBJS)))
 
 -include $(HEADER_DEP)
 
-CFLAGS = -Wall -Wno-unused-variable -Werror -O -fno-omit-frame-pointer -ggdb -march=rv64g
+CFLAGS := -fPIE -fno-pic -fno-plt -Wall -Wno-unused-variable -Werror -O -fno-omit-frame-pointer -ggdb -march=rv64g
 CFLAGS += -MD
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
@@ -55,13 +54,13 @@ endif
 INIT_PROC ?= usershell
 CFLAGS += -DINIT_PROC=\"$(INIT_PROC)\"
 
-# Disable PIE when possible (for Ubuntu 16.10 toolchain)
-ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
-CFLAGS += -fno-pie -no-pie
-endif
-ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
-CFLAGS += -fno-pie -nopie
-endif
+# # Disable PIE when possible (for Ubuntu 16.10 toolchain)
+# ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
+# CFLAGS += -fno-pie -no-pie
+# endif
+# ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
+# CFLAGS += -fno-pie -nopie
+# endif
 
 # empty target
 .FORCE:
@@ -78,7 +77,7 @@ $(C_OBJS): $(BUILDDIR)/$K/%.o : $K/%.c  $(BUILDDIR)/$K/%.d
 
 $(HEADER_DEP): $(BUILDDIR)/$K/%.d : $K/%.c
 	@mkdir -p $(@D)
-	@set -e; rm -f $@; $(CC) -MM $< $(CFLAGS) > $@.$$$$; \
+	@set -e; rm -f $@; $(CC) -MM $< $(CFLAGS) -o $@.$$$$; \
         sed 's,\($*\)\.o[ :]*,\1.o $@ : ,g' < $@.$$$$ > $@; \
         rm -f $@.$$$$
 
@@ -111,6 +110,7 @@ QEMUOPTS = \
 	-nographic \
 	-machine virt \
 	-cpu rv64,svadu=off \
+	-m 512 \
 	-kernel build/kernel	\
 
 run: build/kernel

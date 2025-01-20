@@ -13,7 +13,7 @@ uint64 sys_write(int fd, uint64 va, uint len)
 		return -1;
 	struct proc *p = curr_proc();
 	char str[MAX_STR_LEN];
-	int size = copyinstr(p->pagetable, str, va, MIN(len, MAX_STR_LEN));
+	int size = copystr_from_user(p->mm, str, va, MIN(len, MAX_STR_LEN));
 	debugf("size = %d", size);
 	for (int i = 0; i < size; ++i) {
 		console_putchar(str[i]);
@@ -32,7 +32,7 @@ uint64 sys_read(int fd, uint64 va, uint64 len)
 		int c = consgetc();
 		str[i] = c;
 	}
-	copyout(p->pagetable, va, str, len);
+	copy_to_user(p->mm, va, str, len);
 	return len;
 }
 
@@ -55,7 +55,7 @@ uint64 sys_gettimeofday(uint64 val, int _tz)
 	TimeVal t;
 	t.sec = cycle / CPU_FREQ;
 	t.usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
-	copyout(p->pagetable, val, (char *)&t, sizeof(TimeVal));
+	copy_to_user(p->mm, val, (char *)&t, sizeof(TimeVal));
 	return 0;
 }
 
@@ -80,7 +80,7 @@ uint64 sys_exec(uint64 va)
 {
 	struct proc *p = curr_proc();
 	char name[200];
-	copyinstr(p->pagetable, name, va, 200);
+	copystr_from_user(p->mm, name, va, 200);
 	debugf("sys_exec %s\n", name);
 	return exec(name);
 }
@@ -88,7 +88,7 @@ uint64 sys_exec(uint64 va)
 uint64 sys_wait(int pid, uint64 va)
 {
 	struct proc *p = curr_proc();
-	int *code = (int *)useraddr(p->pagetable, va);
+	int *code = (int *)PA_TO_KVA(useraddr(p->mm, va));
 	return wait(pid, code);
 }
 
@@ -98,20 +98,21 @@ uint64 sys_spawn(uint64 va)
 	return -1;
 }
 
-uint64 sys_set_priority(long long prio){
-    // TODO: your job is to complete the sys call
-    return -1;
+uint64 sys_set_priority(long long prio)
+{
+	// TODO: your job is to complete the sys call
+	return -1;
 }
-
 
 uint64 sys_sbrk(int n)
 {
-        uint64 addr;
-        struct proc *p = curr_proc();
-        addr = p->program_brk;
-        if(growproc(n) < 0)
-                return -1;
-        return addr;
+	uint64 addr;
+	struct proc *p = curr_proc();
+	panic("sbrk");
+	// addr = p->program_brk;
+	// if (growproc(n) < 0)
+		// return -1;
+	return addr;
 }
 
 extern char trap_page[];
@@ -120,10 +121,9 @@ void syscall()
 {
 	struct trapframe *trapframe = curr_proc()->trapframe;
 	int id = trapframe->a7, ret;
-	uint64 args[6] = { trapframe->a0, trapframe->a1, trapframe->a2,
-			   trapframe->a3, trapframe->a4, trapframe->a5 };
-	tracef("syscall %d args = [%x, %x, %x, %x, %x, %x]", id, args[0],
-	       args[1], args[2], args[3], args[4], args[5]);
+	uint64 args[6] = { trapframe->a0, trapframe->a1, trapframe->a2, trapframe->a3, trapframe->a4, trapframe->a5 };
+	tracef("syscall %d args = [%x, %x, %x, %x, %x, %x]", 
+		id, args[0], args[1], args[2], args[3], args[4], args[5]);
 	switch (id) {
 	case SYS_write:
 		ret = sys_write(args[0], args[1], args[2]);
@@ -159,8 +159,8 @@ void syscall()
 		ret = sys_spawn(args[0]);
 		break;
 	case SYS_sbrk:
-                ret = sys_sbrk(args[0]);
-                break;
+		ret = sys_sbrk(args[0]);
+		break;
 	default:
 		ret = -1;
 		errorf("unknown syscall %d", id);

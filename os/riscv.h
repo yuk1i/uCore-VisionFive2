@@ -41,6 +41,8 @@ static inline void w_mepc(uint64 x)
 
 // Supervisor Status Register, sstatus
 
+#define SSTATUS_SUM (1L << 18) // SUM (permit Supervisor User Memory access)
+
 #define SSTATUS_SPP (1L << 8) // Previous mode, 1=Supervisor, 0=User
 #define SSTATUS_SPIE (1L << 5) // Supervisor Previous Interrupt Enable
 #define SSTATUS_UPIE (1L << 4) // User Previous Interrupt Enable
@@ -287,8 +289,12 @@ static inline void sfence_vma()
 	asm volatile("sfence.vma zero, zero");
 }
 
-#define PGSIZE 4096 // bytes per page
-#define PGSHIFT 12 // bits of offset within a page
+#define PGSIZE 		4096 		// bytes per page
+#define PGSIZE_2M 	0x200000 	// bytes per page
+#define PGSHIFT 	12 			// bits of offset within a page
+
+#define ROUNDUP_2N(sz, base) (((sz) + (base) - 1) & ~((base) - 1))
+#define IS_ALIGNED(a, base) (((a) & ((base) - 1)) == 0)
 
 #define PGROUNDUP(sz) (((sz) + PGSIZE - 1) & ~(PGSIZE - 1))
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE - 1))
@@ -314,6 +320,8 @@ static inline void sfence_vma()
 #define PXMASK 0x1FF // 9 bits
 #define PXSHIFT(level) (PGSHIFT + (9 * (level)))
 #define PX(level, va) ((((uint64)(va)) >> PXSHIFT(level)) & PXMASK)
+
+#define MAKE_PTE(pa, flags) (PA2PTE(pa) | (flags | PTE_V))
 
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by

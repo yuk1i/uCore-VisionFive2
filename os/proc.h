@@ -4,6 +4,7 @@
 #include "riscv.h"
 #include "types.h"
 #include "queue.h"
+#include "vm.h"
 
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
@@ -34,17 +35,21 @@ enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
 struct proc {
+	int index;
+
 	enum procstate state; // Process state
 	int pid; // Process ID
-	pagetable_t pagetable; // User page table
-	uint64 ustack; // Virtual address of kernel stack
-	uint64 kstack; // Virtual address of kernel stack
-	struct trapframe *trapframe; // data page for trampoline.S
+	struct mm* mm;
+	struct vma* vma_ustack;
+	struct vma* vma_brk;
+	struct vma* vma_trapframe;
+	struct vma* vma_trampoline;
+
+	struct trapframe * __kva trapframe; // data page for trampoline.S
+	uint64 __kva kstack; // Virtual address of kernel stack
 	struct context context; // swtch() here to run process
-	struct proc *parent; 	// Parent process
+	struct proc *parent; // Parent process
 	uint64 exit_code;
-	struct file *files[FD_BUFFER_SIZE];
-	uint64 program_brk;		// brk of the current process
 };
 
 int cpuid();

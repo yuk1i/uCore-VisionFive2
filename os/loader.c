@@ -10,8 +10,7 @@ void loader_init()
 	for (struct user_app *app = user_apps; app->name != NULL; app++) {
 		printf("\t%s\n", app->name);
 		Elf64_Ehdr *ehdr = (Elf64_Ehdr *)app->elf_address;
-		assert_str(ehdr->e_ident[0] == 0x7F && ehdr->e_ident[1] == 'E' &&
-				   ehdr->e_ident[2] == 'L' && ehdr->e_ident[3] == 'F',
+		assert_str(ehdr->e_ident[0] == 0x7F && ehdr->e_ident[1] == 'E' && ehdr->e_ident[2] == 'L' && ehdr->e_ident[3] == 'F',
 			   "invalid elf header: %s", app->name);
 		assert_equals(ehdr->e_phentsize, sizeof(Elf64_Phdr), "invalid program header size");
 	}
@@ -47,41 +46,78 @@ int load_user_elf(struct user_app *app, struct proc *p)
 		if (phdr->p_flags & PF_X)
 			pte_perm |= PTE_X;
 
-		uint64 va = phdr->p_vaddr; // The ELF requests this phdr loaded to p_vaddr
-		uint64 va_end = PGROUNDUP(va + phdr->p_memsz);
-		uint64 file_off = 0;
+		struct vma *vma = mm_create_vma(p->mm);
+		vma->vm_start = PGROUNDDOWN(phdr->p_vaddr); // The ELF requests this phdr loaded to p_vaddr;
+		vma->vm_end = PGROUNDUP(vma->vm_start + phdr->p_memsz);
+		vma->pte_flags = pte_perm;
+
+		if (mm_mappages(vma)) {
+			panic("mm_mappages");
+		}
+
+		int64 file_off = 0;
 		uint64 file_remains = phdr->p_filesz;
-		while (va < va_end) {
-			// allocate a physical page, copy data from elf file.
-			void *page = kalloc();
-			if (!page)
-				panic("kalloc");
+
+		for (uint64 va = vma->vm_start; va < vma->vm_end; va += PGSIZE) {
+			void *__kva pa = (void *)PA_TO_KVA(walkaddr(p->mm, va));
+			void *src = (void *)(app->elf_address + phdr->p_offset + file_off);
+
 			uint64 copy_size = MIN(file_remains, PGSIZE);
-			if (copy_size > 0) // p_memsz may be larger than p_filesz
-				memmove(page, (void*)(app->elf_address + phdr->p_offset + file_off), copy_size);
-			if (mappages(p->pagetable, va, PGSIZE, (uint64)page, pte_perm) != 0)
-				panic("mappages");
+			memmove(pa, src, copy_size);
+
+			if (copy_size < PGSIZE) {
+				// clear remaining bytes
+				memset(pa + copy_size, 0, PGSIZE - copy_size);
+			}
 			file_off += copy_size;
 			file_remains -= copy_size;
-			va += PGSIZE;
 		}
+
+		if (phdr->p_memsz > phdr->p_filesz) {
+			// ELF requests larger memory than filesz
+			// 	these are .bss segment, clear it to zero.
+
+			uint64 bss_start = phdr->p_vaddr + phdr->p_filesz;
+			uint64 bss_end = phdr->p_vaddr + phdr->p_memsz;
+
+			for (uint64 va = bss_start; va < bss_end; va = PGROUNDDOWN(va) + PGSIZE) {
+				// set [va, page boundary of ba) to zero
+				uint64 page_off = va - PGROUNDDOWN(va);
+				uint64 clear_size = PGROUNDUP(va) - va;
+				void *__kva pa = (void *)PA_TO_KVA(walkaddr(p->mm, PGROUNDDOWN(va)));
+				memset(pa + page_off, 0, clear_size);
+			}
+		}
+
 		assert(file_remains == 0);
-		max_va_end = MAX(max_va_end, va_end);
+		max_va_end = MAX(max_va_end, PGROUNDUP(phdr->p_vaddr + phdr->p_memsz));
 	}
 
-	p->ustack = USTACK_START;
-	for (uint64 va = p->ustack; va < p->ustack + USTACK_SIZE; va += PGSIZE) {
-		void *page = kalloc();
-		if (!page)
-			panic("kalloc");
-		if (mappages(p->pagetable, va, PGSIZE, (uint64)page, PTE_U | PTE_R | PTE_W) != 0)
-			panic("mappages");
+	p->vma_brk = mm_create_vma(p->mm);
+	p->vma_brk->vm_start = max_va_end;
+	p->vma_brk->vm_end = p->vma_brk->vm_start;
+	p->vma_brk->pte_flags = PTE_R | PTE_W | PTE_U;
+	mm_mappages(p->vma_brk);
+
+	p->vma_ustack = mm_create_vma(p->mm);
+	p->vma_ustack->vm_start = USTACK_START - USTACK_SIZE;
+	p->vma_ustack->vm_end = USTACK_START;
+	p->vma_ustack->pte_flags = PTE_R | PTE_W | PTE_U;
+	mm_mappages(p->vma_ustack);
+
+	// vm_print(p->mm->pgt);
+
+	for (uint64 va = p->vma_ustack->vm_start; va < p->vma_ustack->vm_end; va += PGSIZE) {
+		void *__kva pa = (void *)PA_TO_KVA(walkaddr(p->mm, va));
+		memset(pa, 0, PGSIZE);
 	}
+
 	// setup trapframe
-	p->trapframe->sp = p->ustack + USTACK_SIZE;
+	p->trapframe->sp = p->vma_ustack->vm_end;
 	p->trapframe->epc = ehdr->e_entry;
-	p->program_brk = MAX(PGROUNDUP(p->ustack + USTACK_SIZE), PGROUNDUP(max_va_end + PGSIZE));
 	p->state = RUNNABLE;
+
+	// vm_print(p->mm->pgt);
 	return 0;
 }
 
@@ -102,7 +138,7 @@ int load_init_app()
 	if (p == NULL) {
 		panic("allocproc\n");
 	}
-	debugf("load init proc %s", INIT_PROC);
+	infof("load init proc %s", INIT_PROC);
 
 	if (load_user_elf(app, p) < 0) {
 		panic("fail to load init elf.");

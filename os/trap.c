@@ -11,9 +11,19 @@ void kerneltrap() __attribute__((aligned(16))) __attribute__((interrupt("supervi
 // gcc will generate codes for context saving and restoring.
 
 static int in_kerneltrap = 0;
+void print_sysregs();
 
 void kerneltrap()
 {
+	register uint64 *saved_regs;
+	asm volatile("mv %0, s0" : "=r"(saved_regs));
+	uint64 *gprs = saved_regs - 17;
+
+	printf("kernel trap: %p\n", saved_regs);
+	print_sysregs();
+	printf("ra: %p\n", gprs[17]);
+	printf("ra: %p\n", gprs[16]);
+
 	if ((r_sstatus() & SSTATUS_SPP) == 0)
 		panic("kerneltrap: not from supervisor mode");
 
@@ -25,29 +35,24 @@ void kerneltrap()
 		panic("nested kerneltrap");
 	in_kerneltrap = 1;
 
-	switch (cause) {
-	case InstructionPageFault:
-	case LoadPageFault:
-	case StorePageFault: {
-		uint64 addr = r_stval();
-		pagetable_t pgt = SATP_TO_PGTABLE(r_satp());
-		pte_t *pte = walk(pgt, addr, 0);
-		if (pte == NULL)
-			panic("kernel pagefault at %p", addr);
-		if (cause == StorePageFault)
-			*pte |= PTE_A | PTE_D;
-		else
-			*pte |= PTE_A;
-	}
-	default:
-		panic("trap from kernel");
-	}
-}
+	panic("trap from kernel");
 
-// set up to take exceptions and traps while in the kernel.
-void set_usertrap()
-{
-	w_stvec(((uint64)TRAMPOLINE + (uservec - trampoline)) & ~0x3); // DIRECT
+	// switch (cause) {
+	// case InstructionPageFault:
+	// case LoadPageFault:
+	// case StorePageFault: {
+	// 	uint64 addr = r_stval();
+	// 	pagetable_t pgt = SATP_TO_PGTABLE(r_satp());
+	// 	pte_t *pte = walk(pgt, addr, 0);
+	// 	if (pte == NULL)
+	// 		panic("kernel pagefault at %p", addr);
+	// 	if (cause == StorePageFault)
+	// 		*pte |= PTE_A | PTE_D;
+	// 	else
+	// 		*pte |= PTE_A;
+	// }
+	// default:
+	// }
 }
 
 void set_kerneltrap()
@@ -67,28 +72,6 @@ void unknown_trap()
 	exit(-1);
 }
 
-void print_trapframe(struct trapframe *tf)
-{
-	printf("trapframe at %p\n", tf);
-	printf("ra :%p  sp :%p  gp: %p  tp: %p\n", tf->ra, tf->sp, tf->gp, tf->tp);
-	printf("t0 :%p  t1 :%p  t2: %p  s0: %p\n", tf->t0, tf->t1, tf->t2, tf->s0);
-	printf("s1 :%p  a0 :%p  a1: %p  a2: %p\n", tf->s1, tf->a0, tf->a1, tf->a2);
-	printf("a3 :%p  a4 :%p  a5: %p  a6: %p\n", tf->a3, tf->a4, tf->a5, tf->a6);
-	printf("a7 :%p  s2 :%p  s3: %p  s4: %p\n", tf->a7, tf->s2, tf->s3, tf->s4);
-	printf("s5 :%p  s6 :%p  s7: %p  s8: %p\n", tf->s5, tf->s6, tf->s7, tf->s8);
-	printf("s9 :%p  s10:%p  s11:%p  t3: %p\n", tf->s9, tf->s10, tf->s11, tf->t3);
-	printf("t4 :%p  t5:%p   t6 :%p  \n\n", tf->t4, tf->t5, tf->t6);
-}
-
-void print_sysregs()
-{
-	uint64 sstatus = r_sstatus();
-	uint64 sie = r_sie();
-	uint64 sepc = r_sepc();
-	uint64 stval = r_stval();
-	uint64 sip = r_sip();
-	uint64 satp = r_satp();
-}
 
 //
 // handle an interrupt, exception, or system call from user space.
@@ -127,9 +110,9 @@ void usertrap()
 		case StorePageFault:
 		case InstructionPageFault: {
 			uint64 addr = r_stval();
-			pagetable_t pgt = curr_proc()->pagetable;
+			pagetable_t pgt = curr_proc()->mm->pgt;
 			// vm_print(pgt);
-			pte_t *pte = walk(pgt, addr, 0);
+			pte_t *pte = walk(curr_proc()->mm, addr, 0);
 			if (pte != NULL && (*pte & PTE_V)) {
 				*pte |= PTE_A;
 				if (cause == StorePageFault)
@@ -144,7 +127,7 @@ void usertrap()
 			errorf("%d in application, bad addr = %p, bad instruction = %p, "
 			       "core dumped.",
 			       cause, r_stval(), trapframe->epc);
-			vm_print(curr_proc()->pagetable);
+			vm_print(curr_proc()->mm->pgt);
 			exit(-2);
 			break;
 		case IllegalInstruction:
@@ -164,7 +147,6 @@ void usertrap()
 //
 void usertrapret()
 {
-	set_usertrap();
 	struct trapframe *trapframe = curr_proc()->trapframe;
 	trapframe->kernel_satp = r_satp(); // kernel page table
 	trapframe->kernel_sp = curr_proc()->kstack + KSTACK_SIZE; // process's kernel stack
@@ -182,8 +164,10 @@ void usertrapret()
 	w_sstatus(x);
 
 	// tell trampoline.S the user page table to switch to.
-	uint64 satp = MAKE_SATP(curr_proc()->pagetable);
+	uint64 satp = MAKE_SATP(KVA_TO_PA(curr_proc()->mm->pgt));
+	uint64 stvec = (TRAMPOLINE + (uservec - trampoline)) & ~0x3;
+
 	uint64 fn = TRAMPOLINE + (userret - trampoline);
-	tracef("return to user @ %p", trapframe->epc);
-	((void (*)(uint64, uint64))fn)(TRAPFRAME, satp);
+	tracef("return to user @ %p, fn %p", trapframe->epc, fn);
+	((void (*)(uint64, uint64, uint64))fn)(TRAPFRAME, satp, stvec);
 }

@@ -1,6 +1,6 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_entry)
-BASE_ADDRESS = 0x80200000;
+BASE_ADDRESS = 0xffffffff80200000;
 
 SECTIONS
 {
@@ -8,16 +8,16 @@ SECTIONS
     skernel = .;
 
     s_text = .;
-    .text : {
+    .text : AT(0x80200000) {
         *(.text.entry)
         *(.text .text.*)
-        . = ALIGN(0x1000);
+        . = ALIGN(4K);
+        e_text = .;
+        s_trampolime = .;
         *(trampsec)
-        . = ALIGN(0x1000);
     }
 
     . = ALIGN(4K);
-    e_text = .;
     s_rodata = .;
     .rodata : {
         *(.rodata .rodata.*)

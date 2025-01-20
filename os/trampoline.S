@@ -11,7 +11,7 @@
 	.section trampsec
 .globl trampoline
 trampoline:
-.align 4
+.align 4        # .align means uservec is aligned to 2^4 = 16 bytes
 .globl uservec
 uservec:
 	#
@@ -74,7 +74,7 @@ uservec:
 
 .globl userret
 userret:
-        # userret(TRAPFRAME, pagetable)
+        # userret(TRAPFRAME, pagetable, stvec)
         # switch from kernel to user.
         # usertrapret() calls here.
         # a0: TRAPFRAME, in user page table.
@@ -83,6 +83,9 @@ userret:
         # switch to the user page table.
         csrw satp, a1
         sfence.vma zero, zero
+
+        # switch to the user stvec.
+        csrw stvec, a2
 
         # put the saved user a0 in sscratch, so we
         # can swap it with our a0 (TRAPFRAME) in the last step.
