@@ -11,14 +11,7 @@ uint64 sys_write(int fd, uint64 va, uint len)
 	debugf("sys_write fd = %d str = %x, len = %d", fd, va, len);
 	if (fd != STDOUT)
 		return -1;
-	struct proc *p = curr_proc();
-	char str[MAX_STR_LEN];
-	int size = copystr_from_user(p->mm, str, va, MIN(len, MAX_STR_LEN));
-	debugf("size = %d", size);
-	for (int i = 0; i < size; ++i) {
-		console_putchar(str[i]);
-	}
-	return size;
+	return user_console_write(va, len);
 }
 
 uint64 sys_read(int fd, uint64 va, uint64 len)
@@ -26,14 +19,8 @@ uint64 sys_read(int fd, uint64 va, uint64 len)
 	debugf("sys_read fd = %d str = %x, len = %d", fd, va, len);
 	if (fd != STDIN)
 		return -1;
-	struct proc *p = curr_proc();
-	char str[MAX_STR_LEN];
-	for (int i = 0; i < len; ++i) {
-		int c = consgetc();
-		str[i] = c;
-	}
-	copy_to_user(p->mm, va, str, len);
-	return len;
+	
+	return user_console_read(va, len);
 }
 
 __attribute__((noreturn)) void sys_exit(int code)
@@ -88,7 +75,14 @@ uint64 sys_exec(uint64 va)
 uint64 sys_wait(int pid, uint64 va)
 {
 	struct proc *p = curr_proc();
-	int *code = (int *)PA_TO_KVA(useraddr(p->mm, va));
+	
+	acquire(&p->lock);
+	acquire(&p->mm->lock);
+	uint64 pa = useraddr(p->mm, va);
+	release(&p->mm->lock);
+	release(&p->lock);
+
+	int *code = (int *)PA_TO_KVA(pa);
 	return wait(pid, code);
 }
 

@@ -6,6 +6,7 @@
 #include "queue.h"
 #include "vm.h"
 
+#define NCPU (4)
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
 
@@ -31,41 +32,62 @@ struct context {
 	uint64 s11;
 };
 
+struct cpu {
+	struct proc *proc;
+	struct context sched_context;
+	int noff;
+	int intena;
+	// for debug purpose:
+	int cpuid;
+	int mhart_id;
+};
+
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
 struct proc {
-	int index;
-
+	spinlock_t lock;
+	// p->lock must be held when accessing to these fields:
 	enum procstate state; // Process state
 	int pid; // Process ID
-	struct mm* mm;
-	struct vma* vma_ustack;
-	struct vma* vma_brk;
-	struct vma* vma_trapframe;
-	struct vma* vma_trampoline;
+	uint64 exit_code;
+	void *sleep_chan;
+	int killed;
 
-	struct trapframe * __kva trapframe; // data page for trampoline.S
+	struct proc *parent; // Parent process
+
+	int index;
+	struct mm *mm;
+	struct vma *vma_ustack;
+	struct vma *vma_brk;
+	struct vma *vma_trapframe;
+	struct vma *vma_trampoline;
+	struct trapframe *__kva trapframe; // data page for trampoline.S
 	uint64 __kva kstack; // Virtual address of kernel stack
 	struct context context; // swtch() here to run process
-	struct proc *parent; // Parent process
-	uint64 exit_code;
 };
 
-int cpuid();
+static inline int cpuid()
+{
+	return r_tp();
+}
+
+struct cpu *mycpu();
 struct proc *curr_proc();
+
 void exit(int);
 void proc_init();
 void scheduler() __attribute__((noreturn));
 void sched();
 void yield();
+void sleep(void* chan, spinlock_t* lk);
+void wakeup(void* chan);
 int fork();
 int exec(char *);
 int wait(int, int *);
 void add_task(struct proc *);
-struct proc *pop_task();
 struct proc *allocproc();
-int fdalloc(struct file *);
+
 // swtch.S
 void swtch(struct context *, struct context *);
 

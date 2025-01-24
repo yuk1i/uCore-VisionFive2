@@ -3,6 +3,7 @@
 
 #include "riscv.h"
 #include "types.h"
+#include "lock.h"
 #include "const.h"
 
 #define __user  
@@ -16,6 +17,7 @@
 #define PA_TO_KVA(x) (((uint64)(x)) + KERNEL_DIRECT_MAPPING_BASE)
 
 #define IS_USER_VA(x) (((uint64)(x)) <= MAXVA)
+#define __percpu_var __attribute__((section(".percpu.data")))
 
 extern uint64 __pa kernel_image_end_4k;
 extern uint64 __pa kernel_image_end_2M;
@@ -35,6 +37,8 @@ struct vma {
     uint64 pte_flags;
 };
 struct mm {
+    spinlock_t lock;
+    
     pagetable_t __kva pgt;
     struct vma* vma;
     int refcnt;

@@ -1,11 +1,13 @@
 #include "vm.h"
 #include "defs.h"
 #include "riscv.h"
+#include "console.h"
 
 extern char skernel[], ekernel[];
 extern char s_rodata[], e_rodata[];
 extern char s_text[], e_text[];
 extern char s_data[], e_bss[];
+extern char s_percpu[], e_percpu[];
 extern char trampoline[];
 
 pagetable_t kernel_pagetable;
@@ -18,7 +20,7 @@ uint64 __kva kpage_allocator_size;
 static pagetable_t kvmmake();
 void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm);
 
-// Now we have a base Direct Mapping Area: 
+// Now we have a base Direct Mapping Area:
 // 	starts: KERNEL_DIRECT_MAPPING_BASE + kernel_image_end_2M
 //	size: 2MiB.
 
@@ -61,7 +63,6 @@ void kvm_init()
 
 	infof("enable sstatus.SUM == 0", r_sstatus());
 	w_sstatus(r_sstatus() & ~SSTATUS_SIE);
-
 }
 
 // Make a kernel mapping page table for the kernel.
@@ -71,6 +72,7 @@ static pagetable_t kvmmake()
 	kpgtbl = (pagetable_t)allocsetuppage();
 	memset(kpgtbl, 0, PGSIZE);
 
+	// Step.1 : Kernel Image
 	// map kernel text executable and read-only.
 	// 0xffff_ffff_8020_0000 -> 0x8020_0000
 	kvmmap(kpgtbl, (uint64)s_text, KIVA_TO_PA(s_text), (uint64)e_text - (uint64)s_text, PTE_A | PTE_R | PTE_X | PTE_G);
@@ -78,12 +80,23 @@ static pagetable_t kvmmake()
 	// map kernel ro_data: s_rodata to e_rodata
 	kvmmap(kpgtbl, (uint64)s_rodata, KIVA_TO_PA(s_rodata), (uint64)e_rodata - (uint64)s_rodata, PTE_A | PTE_R | PTE_G);
 
-	// map kernel .s_data to .e_bss, 
+	// map kernel .s_data to .e_bss,
 	uint64 kimage_data_size = KIVA_TO_PA(e_bss) - KIVA_TO_PA(s_data);
 	kvmmap(kpgtbl, (uint64)s_data, KIVA_TO_PA(s_data), kimage_data_size, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
 
+	// Step.2 : Kernel percpu
+	// smp: map .percpu
+	kvmmap(kpgtbl, (uint64)s_percpu, KIVA_TO_PA(ekernel), (uint64)e_percpu - (uint64)s_percpu, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
+
+	// Step.3 : Kernel Trampoline
 	// map trampoline
 	kvmmap(kpgtbl, (uint64)TRAMPOLINE, KIVA_TO_PA(trampoline), PGSIZE, PTE_A | PTE_R | PTE_X);
+
+	// Step.5 : Kernel Device MMIO :
+	kvmmap(kpgtbl, KERNEL_PLIC_BASE, PLIC_PHYS, KERNEL_PLIC_SIZE, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
+	kvmmap(kpgtbl, KERNEL_UART0_BASE, UART0_PHYS, KERNEL_UART0_SIZE, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
+
+	// Step.4 : Kernel Direct Mapping
 
 	// RISC-V CPU maps DDR starting at 0x8000_0000
 	const uint64 physical_mems = PHYS_MEM_SIZE;
@@ -92,7 +105,7 @@ static pagetable_t kvmmake()
 
 	// map remaining pages to KERNEL_DIRECT_MAPPING_BASE + pa
 	uint64 direct_mapping_vaddr = KERNEL_DIRECT_MAPPING_BASE + kernel_image_end_2M;
-	uint64 direct_mapping_paddr =  kernel_image_end_2M;
+	uint64 direct_mapping_paddr = kernel_image_end_2M;
 	kvmmap(kpgtbl, direct_mapping_vaddr, direct_mapping_paddr, available_mems, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
 
 	// We have allocated some pages from 0xffff_ffc0_802x_xxxx;

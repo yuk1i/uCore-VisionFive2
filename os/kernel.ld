@@ -1,6 +1,7 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_entry)
-BASE_ADDRESS = 0xffffffff80200000;
+BASE_ADDRESS   = 0xffffffff80200000;
+PERCPU_ADDRESS = 0xffffffff8ff00000;
 
 SECTIONS
 {
@@ -44,6 +45,14 @@ SECTIONS
     . = ALIGN(4K);
     e_bss = .;
     ekernel = .;
+
+    . = PERCPU_ADDRESS;
+    s_percpu = .;
+    .percpu : {
+        *(.percpu.data)
+    }
+    . = ALIGN(4K);
+    e_percpu = .;
 
     /DISCARD/ : {
         *(.eh_frame)

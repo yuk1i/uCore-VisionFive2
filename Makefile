@@ -110,7 +110,7 @@ QEMUOPTS = \
 	-nographic \
 	-machine virt \
 	-cpu rv64,svadu=off \
-	-m 512 \
+	-m 512M \
 	-kernel build/kernel	\
 
 run: build/kernel

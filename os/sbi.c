@@ -23,14 +23,9 @@ int inline sbi_call(uint64 which, uint64 arg0, uint64 arg1, uint64 arg2)
 	return a0;
 }
 
-void console_putchar(int c)
+void sbi_putchar(int c)
 {
 	sbi_call(SBI_CONSOLE_PUTCHAR, c, 0, 0);
-}
-
-int console_getchar()
-{
-	return sbi_call(SBI_CONSOLE_GETCHAR, 0, 0, 0);
 }
 
 void shutdown()

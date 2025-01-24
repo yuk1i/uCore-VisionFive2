@@ -33,11 +33,14 @@ uint64 read_pc()
 	return pc;
 }
 
-void main()
+void main(int mhartid)
 {
 	printf("clean bss: %p - %p\n", s_bss, e_bss);
 	memset(s_bss, 0, e_bss - s_bss);
 	printf("Kernel is Relocating...\nWe are at %p now\n", read_pc());
+	printf("Boot hart %d\n", mhartid);
+	smp_init(mhartid);
+	infof("basic smp inited, thread_id available now, we are cpu 0: %p", mycpu());
 	relocation_start();
 }
 
@@ -48,15 +51,22 @@ void main_relocated()
 	// Step 4. Rebuild final kernel pagetable
 	// vm_print(SATP_TO_PGTABLE(r_satp()));
 	kvm_init();
-	// vm_print((pagetable_t)PA_TO_KIVA(SATP_TO_PGTABLE(r_satp())));
+	vm_print((pagetable_t)PA_TO_KVA(SATP_TO_PGTABLE(r_satp())));
 
 	memset(relocate_pagetable, 0xde, PGSIZE);
 	memset(relocate_pagetable_level1_ident, 0xde, PGSIZE);
 	memset(relocate_pagetable_level1_direct_mapping, 0xde, PGSIZE);
 	memset(relocate_pagetable_level1_high, 0xde, PGSIZE);
 
-	printf("Relocated.\n");
+	infof("Relocated.\n");
+	infof("re-init smp");
 	trap_init();
+	console_init();
+	printf("UART inited.\n");
+
+	plicinit();
+	plicinithart();
+	
 	kpgmgrinit();
 	uvm_init();
 	proc_init();

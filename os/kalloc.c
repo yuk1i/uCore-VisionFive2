@@ -69,7 +69,7 @@ void *__pa kallocpage()
 		kmem.freelist = l->next;
 		memset((char *)l, 0xaf, PGSIZE); // fill with junk
 	}
-	infof("alloc: %p, by %p", l, ra);
+	debugf("alloc: %p, by %p", l, ra);
 	return (void *)KVA_TO_PA((uint64)l);
 }
 

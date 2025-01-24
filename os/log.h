@@ -5,9 +5,10 @@ extern void printf(char *, ...);
 extern int threadid();
 extern void dummy(int, ...);
 extern void shutdown() __attribute__((noreturn));
+extern volatile int panicked;
 
 // debug: force trace level
-// #define LOG_LEVEL_TRACE
+// #define LOG_LEVEL_INFO
 
 #if defined(LOG_LEVEL_ERROR)
 
@@ -114,7 +115,7 @@ enum LOG_COLOR {
 
 #define panic(fmt, ...)                                                        \
 	do {                                                                   \
-		int tid = threadid();                                          \
+		panicked=1; int tid = threadid();                                          \
 		printf("\x1b[%dm[%s %d] %s:%d: " fmt "\x1b[0m\n", RED,         \
 		       "PANIC", tid, __FILE__, __LINE__, ##__VA_ARGS__);       \
 		shutdown();                                                    \

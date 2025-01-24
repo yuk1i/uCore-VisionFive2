@@ -1,5 +1,6 @@
 #include "vm.h"
 #include "defs.h"
+#include "lock.h"
 #include "riscv.h"
 #include "debug.h"
 
@@ -84,6 +85,7 @@ struct mm *mm_create()
 {
 	struct mm *mm = kalloc(&mm_allocator);
 	memset(mm, 0, sizeof(*mm));
+	spinlock_init(&mm->lock, "mm");
 	mm->vma = NULL;
 	mm->refcnt = 1;
 

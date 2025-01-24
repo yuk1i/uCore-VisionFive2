@@ -3,8 +3,7 @@
 
 #include "types.h"
 
-void console_putchar(int);
-int console_getchar();
+void sbi_putchar(int);
 void shutdown();
 void set_timer(uint64 stime);
 

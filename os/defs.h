@@ -12,6 +12,15 @@
 #include "types.h"
 #include "vm.h"
 
+void smp_init(uint64 boot_hartid);
+
+
+// plic.c
+void            plicinit(void);
+void            plicinithart(void);
+int             plic_claim(void);
+void            plic_complete(int);
+
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x) / sizeof((x)[0]))
 #define MIN(a, b) (a < b ? a : b)
