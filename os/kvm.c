@@ -7,7 +7,6 @@ extern char skernel[], ekernel[];
 extern char s_rodata[], e_rodata[];
 extern char s_text[], e_text[];
 extern char s_data[], e_bss[];
-extern char s_percpu[], e_percpu[];
 extern char trampoline[];
 
 pagetable_t kernel_pagetable;
@@ -61,8 +60,8 @@ void kvm_init()
 	sfence_vma();
 	infof("enable pageing at %p", r_satp());
 
-	infof("enable sstatus.SUM == 0", r_sstatus());
-	w_sstatus(r_sstatus() & ~SSTATUS_SIE);
+	// infof("enable sstatus.SUM == 0", r_sstatus());
+	// w_sstatus(r_sstatus() & ~SSTATUS_SIE);
 }
 
 // Make a kernel mapping page table for the kernel.
@@ -84,19 +83,30 @@ static pagetable_t kvmmake()
 	uint64 kimage_data_size = KIVA_TO_PA(e_bss) - KIVA_TO_PA(s_data);
 	kvmmap(kpgtbl, (uint64)s_data, KIVA_TO_PA(s_data), kimage_data_size, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
 
-	// Step.2 : Kernel percpu
-	// smp: map .percpu
-	kvmmap(kpgtbl, (uint64)s_percpu, KIVA_TO_PA(ekernel), (uint64)e_percpu - (uint64)s_percpu, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
-
-	// Step.3 : Kernel Trampoline
+	// Step.2 : Kernel Trampoline
 	// map trampoline
 	kvmmap(kpgtbl, (uint64)TRAMPOLINE, KIVA_TO_PA(trampoline), PGSIZE, PTE_A | PTE_R | PTE_X);
 
-	// Step.5 : Kernel Device MMIO :
+	// Step.3 : Kernel Device MMIO :
 	kvmmap(kpgtbl, KERNEL_PLIC_BASE, PLIC_PHYS, KERNEL_PLIC_SIZE, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
 	kvmmap(kpgtbl, KERNEL_UART0_BASE, UART0_PHYS, KERNEL_UART0_SIZE, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
 
-	// Step.4 : Kernel Direct Mapping
+	// Step.4 : Kernel Scheduler stack:
+	uint64 sched_stack = KERNEL_STACK_SCHED;
+	for (int i = 0; i < NCPU; i++) {
+		struct cpu *c = getcpu(i);
+		// allocate #KERNEL_STACK_SIZE / PGSIZE pages
+		for (uint64 va = sched_stack; va < sched_stack + KERNEL_STACK_SIZE; va += PGSIZE) {
+			uint64 __pa newpg = KVA_TO_PA(allockernelpage());
+			infof("map halt %d, va:%p, pa:%p", i, va, newpg);
+			kvmmap(kpgtbl, va, newpg, PGSIZE, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
+		}
+		c->sched_kstack_top = sched_stack + KERNEL_STACK_SIZE;
+		// double the sched_stack to make a significant gap between different cpus.
+		sched_stack += 2* KERNEL_STACK_SIZE;
+	}
+
+	// Step.5 : Kernel Direct Mapping
 
 	// RISC-V CPU maps DDR starting at 0x8000_0000
 	const uint64 physical_mems = PHYS_MEM_SIZE;

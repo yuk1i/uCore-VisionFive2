@@ -8,6 +8,7 @@ extern char e_text[]; // kernel.ld sets this to end of kernel code.
 extern char s_bss[];
 extern char e_bss[];
 extern char ekernel[], skernel[];
+extern char secondary_cpu_entry[];
 
 #define KIVA_TO_PA(x) (((uint64)(x)) - KERNEL_OFFSET)
 #define PA_TO_KIVA(x) (((uint64)(x)) + KERNEL_OFFSET)
@@ -21,6 +22,10 @@ static char relocate_pagetable_level1_direct_mapping[PGSIZE] __attribute__((alig
 static char relocate_pagetable_level1_high[PGSIZE] __attribute__((aligned(PGSIZE)));
 
 static void relocation_start();
+static void main_relocated();
+static void main_relocated2();
+static void secondary_main_relocated();
+static void secondary_main_relocated2();
 
 uint64 read_pc()
 {
@@ -35,45 +40,129 @@ uint64 read_pc()
 
 void main(int mhartid)
 {
-	printf("clean bss: %p - %p\n", s_bss, e_bss);
+	extern char boot_stack[];
+	printf("boot stack: %p. clean bss: %p - %p\n", boot_stack, s_bss, e_bss);
 	memset(s_bss, 0, e_bss - s_bss);
-	printf("Kernel is Relocating...\nWe are at %p now\n", read_pc());
 	printf("Boot hart %d\n", mhartid);
 	smp_init(mhartid);
-	infof("basic smp inited, thread_id available now, we are cpu 0: %p", mycpu());
+	infof("basic smp inited, thread_id available now, we are cpu %d: %p", mhartid, mycpu());
+
+	printf("Kernel is Relocating...\n");
 	relocation_start();
+
+	// We will jump to kernel's real pagetable in relocation_start.
+	__builtin_unreachable();
 }
 
-void main_relocated()
+static void main_relocated()
 {
-	printf("We are at high address now! PC: %p\n", read_pc());
+	printf("Boot HART Relocated. We are at high address now! PC: %p\n", read_pc());
 
 	// Step 4. Rebuild final kernel pagetable
-	// vm_print(SATP_TO_PGTABLE(r_satp()));
 	kvm_init();
-	vm_print((pagetable_t)PA_TO_KVA(SATP_TO_PGTABLE(r_satp())));
+	// vm_print(SATP_TO_PGTABLE(r_satp()));
+
+	uint64 new_sp = mycpu()->sched_kstack_top;
+	asm volatile("mv sp, %0" ::"r"(new_sp));
+	main_relocated2();
+}
+
+static volatile int booted_count = 0;
+static volatile int halt_specific_init = 0;
+
+#define ENABLE_SMP 1
+
+static void main_relocated2()
+{
+	printf("Relocated. Boot halt sp at %p\n", r_sp());
+	printf("Boot another cpus.\n");
+
+#ifdef ENABLE_SMP
+	for (int i = 0; i < 4; i++) {
+		if (i == mycpu()->mhart_id)
+			continue;
+		printf("- booting %d", i);
+		int booted_cnt = booted_count;
+
+		int ret = sbi_hsm_hart_start(i, KIVA_TO_PA(secondary_cpu_entry), r_satp());
+		printf(" = %d. waiting for online\n", ret);
+
+		while (booted_count == booted_cnt)
+			;
+	}
+#endif
 
 	memset(relocate_pagetable, 0xde, PGSIZE);
 	memset(relocate_pagetable_level1_ident, 0xde, PGSIZE);
 	memset(relocate_pagetable_level1_direct_mapping, 0xde, PGSIZE);
 	memset(relocate_pagetable_level1_high, 0xde, PGSIZE);
 
-	infof("Relocated.\n");
-	infof("re-init smp");
 	trap_init();
 	console_init();
 	printf("UART inited.\n");
-
 	plicinit();
-	plicinithart();
-	
 	kpgmgrinit();
 	uvm_init();
 	proc_init();
 	loader_init();
-	timer_init();
 	load_init_app();
-	infof("start scheduler!");
+	printf_init();
+
+	timer_init();
+	plicinithart();
+
+	MEMORY_FENCE();
+	halt_specific_init = 1;
+	MEMORY_FENCE();
+
+	infof("start scheduler!", mycpu()->mhart_id);
+	scheduler();
+}
+
+void secondary_main_pa(int hartid)
+{
+	printf("halt %d booting. Relocating\n", hartid);
+
+	// init mycpu()
+	w_tp(hartid);
+	getcpu(hartid)->mhart_id = hartid;
+
+	// switch to temporary pagetable.
+	w_satp(MAKE_SATP(relocate_pagetable));
+	sfence_vma();
+
+	// jump to kernel's high address
+	uint64 fn = (uint64)&secondary_main_relocated + KERNEL_OFFSET;
+
+	asm volatile("mv a1, %0\n" ::"r"(fn));
+	asm volatile("la sp, boot_stack_top");
+	asm volatile("add sp, sp, %0" ::"r"(KERNEL_OFFSET));
+	asm volatile("jr a1");
+
+	__builtin_unreachable();
+}
+
+static void secondary_main_relocated()
+{
+	extern pagetable_t kernel_pagetable;
+	w_satp(MAKE_SATP(KVA_TO_PA(kernel_pagetable)));
+
+	uint64 new_sp = mycpu()->sched_kstack_top;
+	asm volatile("mv sp, %0" ::"r"(new_sp));
+	secondary_main_relocated2();
+}
+
+static void secondary_main_relocated2()
+{
+	printf("halt %d booted. sp: %p\n", mycpu()->mhart_id, r_sp());
+	booted_count++;
+	while (!halt_specific_init)
+		;
+
+	trap_init();
+	timer_init();
+	plicinithart();
+	infof("start scheduler!", mycpu()->mhart_id);
 	scheduler();
 }
 
@@ -159,9 +248,9 @@ static void relocation_start()
 
 	uint64 jump = (uint64)&main_relocated + KERNEL_OFFSET;
 
-	asm volatile ("mv a1, %0\n" :: "r"(jump));
-	asm volatile ("la sp, boot_stack_top");
-	asm volatile ("add sp, sp, %0" :: "r"(KERNEL_OFFSET));
-	asm volatile ("jr a1");
+	asm volatile("mv a1, %0\n" ::"r"(jump));
+	asm volatile("la sp, boot_stack_top");
+	asm volatile("add sp, sp, %0" ::"r"(KERNEL_OFFSET));
+	asm volatile("jr a1");
 	// jump();
 }

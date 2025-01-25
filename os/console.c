@@ -27,7 +27,7 @@ struct {
 
 void consputc(int c)
 {
-	if (!uart_inited || panicked) // when panicked, use SBI output
+	if (!uart_inited) // when panicked, use SBI output
 		sbi_putchar(c);
 	else {
 		uart_putchar(c);
@@ -36,14 +36,16 @@ void consputc(int c)
 
 static void uart_putchar(int ch)
 {
-	push_off();
+	int intr = intr_get();
+	intr_off();
 	while ((ReadReg(LSR) & LSR_TX_IDLE) == 0)
 		MEMORY_FENCE();
 	MEMORY_FENCE();
 
 	WriteReg(THR, ch);
 	MEMORY_FENCE();
-	pop_off();
+	if (intr)
+		intr_on();
 }
 
 void console_init()
@@ -142,7 +144,7 @@ void uart_intr()
 		int c = uartgetc();
 		if (c == -1)
 			break;
-		infof("uart: %c", c);
+		// infof("uart: %c", c);
 		consintr(c);
 	}
 }

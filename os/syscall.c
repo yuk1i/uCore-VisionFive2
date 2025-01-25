@@ -8,7 +8,7 @@
 
 uint64 sys_write(int fd, uint64 va, uint len)
 {
-	debugf("sys_write fd = %d str = %x, len = %d", fd, va, len);
+	debugf("sys_write fd = %d str = %p, len = %d", fd, va, len);
 	if (fd != STDOUT)
 		return -1;
 	return user_console_write(va, len);
@@ -16,7 +16,7 @@ uint64 sys_write(int fd, uint64 va, uint len)
 
 uint64 sys_read(int fd, uint64 va, uint64 len)
 {
-	debugf("sys_read fd = %d str = %x, len = %d", fd, va, len);
+	debugf("sys_read fd = %d str = %p, len = %d", fd, va, len);
 	if (fd != STDIN)
 		return -1;
 	

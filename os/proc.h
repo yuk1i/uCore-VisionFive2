@@ -36,7 +36,9 @@ struct cpu {
 	struct proc *proc;
 	struct context sched_context;
 	int noff;
-	int intena;
+	int interrupt_on;
+	uint64 sched_kstack_top;
+	int inkernel_trap;
 	// for debug purpose:
 	int cpuid;
 	int mhart_id;
@@ -73,6 +75,7 @@ static inline int cpuid()
 }
 
 struct cpu *mycpu();
+struct cpu* getcpu(int i);
 struct proc *curr_proc();
 
 void exit(int);

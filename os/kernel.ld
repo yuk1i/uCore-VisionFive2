@@ -46,14 +46,6 @@ SECTIONS
     e_bss = .;
     ekernel = .;
 
-    . = PERCPU_ADDRESS;
-    s_percpu = .;
-    .percpu : {
-        *(.percpu.data)
-    }
-    . = ALIGN(4K);
-    e_percpu = .;
-
     /DISCARD/ : {
         *(.eh_frame)
     }

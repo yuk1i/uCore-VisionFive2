@@ -1,7 +1,15 @@
 #include <stdarg.h>
 #include "console.h"
 #include "defs.h"
+#include "lock.h"
+
 static char digits[] = "0123456789abcdef";
+
+// lock to avoid interleaving concurrent printf's.
+static struct {
+	spinlock_t lock;
+	int locking;
+} pr;
 
 static void printint(int xx, int base, int sign)
 {
@@ -45,6 +53,10 @@ void printf(char *fmt, ...)
 	if (fmt == 0)
 		panic("null fmt");
 
+	int locking = pr.locking;
+	if (locking)
+		acquire(&pr.lock);
+
 	va_start(ap, fmt);
 	for (i = 0; (c = fmt[i] & 0xff) != 0; i++) {
 		if (c != '%') {
@@ -83,4 +95,12 @@ void printf(char *fmt, ...)
 			break;
 		}
 	}
+	if (locking)
+		release(&pr.lock);
+}
+
+void printf_init()
+{
+	spinlock_init(&pr.lock, "printf");
+	pr.locking = 1;
 }

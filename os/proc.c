@@ -22,10 +22,10 @@ static spinlock_t wait_lock;
 
 struct proc *curr_proc()
 {
-	push_off();
+	// push_off();
 	struct cpu *cpu = mycpu();
 	struct proc *proc = cpu->proc;
-	pop_off();
+	// pop_off();
 	return proc;
 }
 
@@ -35,6 +35,9 @@ int threadid()
 		return -1;
 	return curr_proc()->pid;
 }
+
+static uint64 proc_kstack = KERNEL_STACK_PROCS;
+extern pagetable_t kernel_pagetable;
 
 // initialize the proc table at boot time.
 void proc_init()
@@ -56,7 +59,15 @@ void proc_init()
 		spinlock_init(&p->lock, "proc");
 		p->index = i;
 		p->state = UNUSED;
-		p->kstack = PA_TO_KVA(kallocpage());
+
+		p->kstack = proc_kstack;
+		for (uint64 va = proc_kstack; va < proc_kstack + KERNEL_STACK_SIZE; va += PGSIZE) {
+			uint64 __pa newpg = (uint64)kallocpage();
+			kvmmap(kernel_pagetable, va, newpg, PGSIZE, PTE_A | PTE_D | PTE_R | PTE_W);
+		}
+		sfence_vma();
+		proc_kstack += 2 * KERNEL_STACK_SIZE;
+
 		p->trapframe = (struct trapframe *)PA_TO_KVA(kallocpage());
 		pool[i] = p;
 	}
@@ -124,10 +135,10 @@ found:
 	p->parent = NULL;
 	p->exit_code = 0;
 	memset(&p->context, 0, sizeof(p->context));
-	memset((void *)p->kstack, 0, KSTACK_SIZE);
+	memset((void *)p->kstack, 0, KERNEL_STACK_SIZE);
 	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
 	p->context.ra = (uint64)first_sched_ret;
-	p->context.sp = p->kstack + KSTACK_SIZE;
+	p->context.sp = p->kstack + KERNEL_STACK_SIZE;
 
 	assert(holding(&p->lock));
 	return p;
@@ -136,11 +147,13 @@ found:
 static void first_sched_ret(void)
 {
 	release(&curr_proc()->lock);
+	intr_off();
 	usertrapret();
 }
 
 static int all_dead()
 {
+	push_off();
 	int alive = 0;
 	for (int i = 0; i < NPROC; i++) {
 		struct proc *p = pool[i];
@@ -151,6 +164,7 @@ static int all_dead()
 		if (alive)
 			break;
 	}
+	pop_off();
 	return !alive;
 }
 
@@ -170,7 +184,8 @@ void scheduler()
 	// 	And the scheduler context is saved on "mycpu()->sched_context"
 
 	for (;;) {
-		intr_off();
+		// intr may be on here.
+
 		p = fetch_task();
 		if (p == NULL) {
 			// if we cannot find a process in the task_queue
@@ -181,13 +196,14 @@ void scheduler()
 				// nothing to run; stop running on this core until an interrupt.
 				intr_on();
 				asm volatile("wfi");
+				intr_off();
 				continue;
 			}
 		}
 
 		acquire(&p->lock);
 		assert(p->state == RUNNABLE);
-		infof("[cpu %d] switch to proc %d(%d)", c->cpuid, p->index, p->pid);
+		infof("switch to proc %d(%d)", p->index, p->pid);
 		p->state = RUNNING;
 		c->proc = p;
 		swtch(&c->sched_context, &p->context);
@@ -214,6 +230,7 @@ void scheduler()
 // there's no process.
 void sched()
 {
+	int interrupt_on;
 	struct proc *p = curr_proc();
 
 	if (!holding(&p->lock))
@@ -222,12 +239,14 @@ void sched()
 		panic("holding another locks");
 	if (p->state == RUNNING)
 		panic("sched running process");
-
-	extern int in_kerneltrap;
-	if (in_kerneltrap)
+	if (mycpu()->inkernel_trap)
 		panic("sched should never be called in kernel trap context.");
+	assert(!intr_get());
 
+	interrupt_on = mycpu()->interrupt_on;
+	debugf("switch to scheduler %d(%d)", p->index, p->pid);
 	swtch(&p->context, &mycpu()->sched_context);
+	mycpu()->interrupt_on = interrupt_on;
 
 	// if scheduler returns here: p->lock must be holding.
 	if (!holding(&p->lock))
@@ -238,7 +257,7 @@ void sched()
 void yield()
 {
 	struct proc *p = curr_proc();
-	infof("yield: (%d)%p", p->pid, p);
+	debugf("yield: (%d)%p", p->pid, p);
 
 	acquire(&p->lock);
 	p->state = RUNNABLE;
@@ -264,7 +283,6 @@ void freeproc(struct proc *p)
 	mm_free(p->mm);
 	p->vma_brk = NULL;
 	p->vma_ustack = NULL;
-	
 }
 
 void sleep(void *chan, spinlock_t *lk)
@@ -376,7 +394,6 @@ int wait(int pid, int *code)
 			acquire(&child->lock);
 			if (child->parent == p) {
 				havekids = 1;
-				infof("find child %d", child->pid);
 				if (child->state == ZOMBIE && (pid <= 0 || child->pid == pid)) {
 					int cpid = child->pid;
 					// Found one.

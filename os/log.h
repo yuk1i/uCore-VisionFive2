@@ -8,7 +8,7 @@ extern void shutdown() __attribute__((noreturn));
 extern volatile int panicked;
 
 // debug: force trace level
-// #define LOG_LEVEL_INFO
+#define LOG_LEVEL_INFO
 
 #if defined(LOG_LEVEL_ERROR)
 
@@ -61,7 +61,7 @@ enum LOG_COLOR {
 #if defined(USE_LOG_ERROR)
 #define errorf(fmt, ...)                                                       \
 	do {                                                                   \
-		int tid = threadid();                                          \
+		int tid = cpuid();                                          \
 		printf("\x1b[%dm[%s %d]" fmt "\x1b[0m\n", RED, "ERROR", tid,   \
 		       ##__VA_ARGS__);                                         \
 	} while (0)
@@ -72,7 +72,7 @@ enum LOG_COLOR {
 #if defined(USE_LOG_WARN)
 #define warnf(fmt, ...)                                                        \
 	do {                                                                   \
-		int tid = threadid();                                          \
+		int tid = cpuid();                                          \
 		printf("\x1b[%dm[%s %d]" fmt "\x1b[0m\n", YELLOW, "WARN", tid, \
 		       ##__VA_ARGS__);                                         \
 	} while (0)
@@ -83,7 +83,7 @@ enum LOG_COLOR {
 #if defined(USE_LOG_INFO)
 #define infof(fmt, ...)                                                        \
 	do {                                                                   \
-		int tid = threadid();                                          \
+		int tid = cpuid();                                          \
 		printf("\x1b[%dm[%s %d] %s:" fmt "\x1b[0m\n", BLUE, "INFO",    \
 		       tid, __func__, ##__VA_ARGS__);                          \
 	} while (0)

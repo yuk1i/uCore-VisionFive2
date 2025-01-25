@@ -17,7 +17,6 @@ enum {
 #define PHYS_MEM_SIZE	(64ull * 1024 * 1024)
 #define VALID_PHYS_ADDR(pa) (((pa) >= KERNEL_PHYS_BASE && (pa) <= RISCV_DDR_BASE + PHYS_MEM_SIZE))
 
-
 /**
  * Kernel Memory Layout:
  * 
@@ -34,11 +33,11 @@ enum {
  * 				 	is mapped to [0x0000_0000_8020_0000, 0x0000_0000_8020_5000) 
  * 				.rodata:  
  * 
- * [0xffff_ffff_8ff0_0000] : Kernel percpu structures.
- * 
  * [0xffff_ffff_a000_0000] : Device MMIO.
  * 
- * [0xffff_ffff_d000_0000] : Kernel stack.
+ * [0xffff_ffff_d000_0000] : Kernel stack for processs.
+ * 
+ * [0xffff_ffff_ff00_0000] : Kernel stack for scheduler.
  */
 
 #define KERNEL_VIRT_BASE 0xffffffff80200000ull
@@ -47,6 +46,11 @@ enum {
 #define KERNEL_DIRECT_MAPPING_BASE 	0xffffffc000000000ull
 #define KERNEL_ALLOCATOR_BASE 		0xfffffffd00000000ull
 #define KERNEL_ALLOCATOR_GAP  		0x0000000001000000ull
+
+#define KERNEL_STACK_SCHED			0xffffffffff000000ull
+#define KERNEL_STACK_PROCS			0xfffffffe00000000ull
+
+#define KERNEL_STACK_SIZE 			(2 * PGSIZE)
 
 #define KERNEL_DEVICE_MMIO_BASE 	0xffffffffd0000000ull
 #define KERNEL_PLIC_BASE			(KERNEL_DEVICE_MMIO_BASE)

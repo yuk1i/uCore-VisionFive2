@@ -3,8 +3,9 @@
 #include "proc.h"
 #include "defs.h"
 
-void spinlock_init(struct spinlock *lk, char *name)
+void spinlock_init(spinlock_t *lk, char *name)
 {
+	memset(lk, 0, sizeof(*lk));
 	lk->name = name;
 	lk->locked = 0;
 	lk->cpu = 0;
@@ -12,9 +13,9 @@ void spinlock_init(struct spinlock *lk, char *name)
 
 // Acquire the lock.
 // Loops (spins) until the lock is acquired.
-void acquire(struct spinlock *lk)
+void acquire(spinlock_t *lk)
 {
-    uint64 ra = r_ra();
+	uint64 ra = r_ra();
 	push_off(); // disable interrupts to avoid deadlock.
 	if (holding(lk))
 		panic("already acquired by %p, now %p", lk->where, ra);
@@ -38,7 +39,7 @@ void acquire(struct spinlock *lk)
 }
 
 // Release the lock.
-void release(struct spinlock *lk)
+void release(spinlock_t *lk)
 {
 	if (!holding(lk))
 		panic("release");
@@ -68,7 +69,7 @@ void release(struct spinlock *lk)
 
 // Check whether this cpu is holding the lock.
 // Interrupts must be off.
-int holding(struct spinlock *lk)
+int holding(spinlock_t *lk)
 {
 	int r;
 	r = (lk->locked && lk->cpu == mycpu());
@@ -81,24 +82,33 @@ int holding(struct spinlock *lk)
 
 void push_off(void)
 {
-	int old = intr_get();
+	uint64 ra = r_ra();
 
+	int old = intr_get();
 	intr_off();
-	if (mycpu()->noff == 0)
-		mycpu()->intena = old;
+
+	if (mycpu()->noff == 0) {
+		// warnf("intr on saved: %p", ra);
+		mycpu()->interrupt_on = old;
+	}
 	mycpu()->noff += 1;
 }
 
 void pop_off(void)
 {
+	uint64 ra = r_ra();
+
 	struct cpu *c = mycpu();
 	if (intr_get())
 		panic("pop_off - interruptible");
 	if (c->noff < 1)
-		panic("pop_off");
+		panic("pop_off - unpair");
 	c->noff -= 1;
-	if (c->noff == 0 && c->intena)
+	if (c->noff == 0 && c->interrupt_on) {
+		if (c->inkernel_trap)
+			panic("pop_off->intr_on happens in kernel trap");
 		intr_on();
+	}
 }
 
 // void initsleeplock(struct sleeplock *lk, char *name)
