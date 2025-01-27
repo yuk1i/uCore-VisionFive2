@@ -28,7 +28,7 @@ HEADER_DEP := $(addsuffix .d, $(basename $(C_OBJS)))
 
 -include $(HEADER_DEP)
 
-CFLAGS := -fPIE -fno-pic -fno-plt -Wall -Wno-unused-variable -Werror -O -fno-omit-frame-pointer -ggdb -march=rv64g
+CFLAGS := -no-pie -Wall -Wno-unused-variable -Werror -O -fno-omit-frame-pointer -ggdb -march=rv64g
 CFLAGS += -MD
 CFLAGS += -mcmodel=medany
 CFLAGS += -ffreestanding -fno-common -nostdlib -mno-relax
@@ -36,6 +36,7 @@ CFLAGS += -I$K
 CFLAGS += -std=gnu17
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
+LDFLAGS := -static --no-relax -no-pie -z max-page-size=4096 -nostdlib
 
 LOG ?= error
 
@@ -64,8 +65,6 @@ CFLAGS += -DINIT_PROC=\"$(INIT_PROC)\"
 
 # empty target
 .FORCE:
-
-LDFLAGS = -z max-page-size=4096
 
 $(AS_OBJS): $(BUILDDIR)/$K/%.o : $K/%.S
 	@mkdir -p $(@D)
