@@ -11,34 +11,6 @@ static inline uint64 r_mhartid()
 	return x;
 }
 
-// Machine Status Register, mstatus
-
-#define MSTATUS_MPP_MASK (3L << 11) // previous mode.
-#define MSTATUS_MPP_M (3L << 11)
-#define MSTATUS_MPP_S (1L << 11)
-#define MSTATUS_MPP_U (0L << 11)
-#define MSTATUS_MIE (1L << 3) // machine-mode interrupt enable.
-
-static inline uint64 r_mstatus()
-{
-	uint64 x;
-	asm volatile("csrr %0, mstatus" : "=r"(x));
-	return x;
-}
-
-static inline void w_mstatus(uint64 x)
-{
-	asm volatile("csrw mstatus, %0" : : "r"(x));
-}
-
-// machine exception program counter, holds the
-// instruction address to which a return from
-// exception will go.
-static inline void w_mepc(uint64 x)
-{
-	asm volatile("csrw mepc, %0" : : "r"(x));
-}
-
 // Supervisor Status Register, sstatus
 
 #define SSTATUS_SUM (1L << 18) // SUM (permit Supervisor User Memory access)
@@ -90,22 +62,6 @@ static inline void w_sie(uint64 x)
 	asm volatile("csrw sie, %0" : : "r"(x));
 }
 
-// Machine-mode Interrupt Enable
-#define MIE_MEIE (1L << 11) // external
-#define MIE_MTIE (1L << 7) // timer
-#define MIE_MSIE (1L << 3) // software
-static inline uint64 r_mie()
-{
-	uint64 x;
-	asm volatile("csrr %0, mie" : "=r"(x));
-	return x;
-}
-
-static inline void w_mie(uint64 x)
-{
-	asm volatile("csrw mie, %0" : : "r"(x));
-}
-
 // machine exception program counter, holds the
 // instruction address to which a return from
 // exception will go.
@@ -121,32 +77,6 @@ static inline uint64 r_sepc()
 	return x;
 }
 
-// Machine Exception Delegation
-static inline uint64 r_medeleg()
-{
-	uint64 x;
-	asm volatile("csrr %0, medeleg" : "=r"(x));
-	return x;
-}
-
-static inline void w_medeleg(uint64 x)
-{
-	asm volatile("csrw medeleg, %0" : : "r"(x));
-}
-
-// Machine Interrupt Delegation
-static inline uint64 r_mideleg()
-{
-	uint64 x;
-	asm volatile("csrr %0, mideleg" : "=r"(x));
-	return x;
-}
-
-static inline void w_mideleg(uint64 x)
-{
-	asm volatile("csrw mideleg, %0" : : "r"(x));
-}
-
 // Supervisor Trap-Vector Base Address
 // low two bits are mode.
 static inline void w_stvec(uint64 x)
@@ -159,12 +89,6 @@ static inline uint64 r_stvec()
 	uint64 x;
 	asm volatile("csrr %0, stvec" : "=r"(x));
 	return x;
-}
-
-// Machine-mode interrupt vector
-static inline void w_mtvec(uint64 x)
-{
-	asm volatile("csrw mtvec, %0" : : "r"(x));
 }
 
 // use riscv's sv39 page table scheme.
@@ -214,19 +138,6 @@ static inline uint64 r_stval()
 	return x;
 }
 
-// Machine-mode Counter-Enable
-static inline void w_mcounteren(uint64 x)
-{
-	asm volatile("csrw mcounteren, %0" : : "r"(x));
-}
-
-static inline uint64 r_mcounteren()
-{
-	uint64 x;
-	asm volatile("csrr %0, mcounteren" : "=r"(x));
-	return x;
-}
-
 // machine-mode cycle counter
 static inline uint64 r_time()
 {
@@ -238,13 +149,16 @@ static inline uint64 r_time()
 // enable device interrupts
 static inline void intr_on()
 {
-	w_sstatus(r_sstatus() | SSTATUS_SIE);
+	// set SIE bit
+	asm volatile("csrrs x0, sstatus, %0":: "r"(SSTATUS_SIE));
+	// w_sstatus(r_sstatus() | SSTATUS_SIE);
 }
 
 // disable device interrupts
 static inline void intr_off()
 {
-	w_sstatus(r_sstatus() & ~SSTATUS_SIE);
+	asm volatile("csrrc x0, sstatus, %0":: "r"(SSTATUS_SIE));
+	// w_sstatus(r_sstatus() & ~SSTATUS_SIE);
 }
 
 // are device interrupts enabled?

@@ -2,12 +2,14 @@
 #include "defs.h"
 #include "loader.h"
 #include "timer.h"
+#include "debug.h"
 #include "trap.h"
 
 extern char e_text[]; // kernel.ld sets this to end of kernel code.
 extern char s_bss[];
 extern char e_bss[];
 extern char ekernel[], skernel[];
+extern char boot_stack_top[];
 
 #define KIVA_TO_PA(x) (((uint64)(x)) - KERNEL_OFFSET)
 #define PA_TO_KIVA(x) (((uint64)(x)) + KERNEL_OFFSET)
@@ -94,10 +96,13 @@ static void relocation_start()
 
 	printf("Kernel size: %p, Rounded to 2MiB: %p\n", kernel_size, kernel_size_2M);
 
+	// Calculate Kernel Mapping Base & End
 	uint64 kernel_phys_base = KERNEL_PHYS_BASE;
 	uint64 kernel_phys_end = kernel_phys_base + kernel_size_2M;
 	uint64 kernel_virt_base = KERNEL_VIRT_BASE;
 	uint64 kernel_virt_end = kernel_virt_base + kernel_size_2M;
+
+	// Calculate the first Direct Mapping Base & End
 	uint64 kernel_la_phy_base = kernel_image_end_2M;
 	uint64 kernel_la_base = KERNEL_DIRECT_MAPPING_BASE + kernel_la_phy_base;
 	uint64 kernel_la_end = kernel_la_base + PGSIZE_2M;
@@ -142,16 +147,18 @@ static void relocation_start()
 		printf("Mapping Direct Mapping: %p to %p\n", kernel_la_base, kernel_la_phy_base);
 	}
 
+	vm_print_tmp(pgt_root);
+
 	// Step 4. Enable SATP and jump to higher VirtAddr.
 	printf("Enable SATP on temporary pagetable.\n");
 	w_satp(MAKE_SATP(pgt_root));
 	sfence_vma();
 
 	uint64 jump = (uint64)&main_relocated + KERNEL_OFFSET;
+	uint64 new_sp = (uint64)&boot_stack_top + KERNEL_OFFSET;
 
 	asm volatile ("mv a1, %0\n" :: "r"(jump));
-	asm volatile ("la sp, boot_stack_top");
-	asm volatile ("add sp, sp, %0" :: "r"(KERNEL_OFFSET));
+	asm volatile ("mv sp, %0" :: "r"(new_sp));
 	asm volatile ("jr a1");
 	// jump();
 }

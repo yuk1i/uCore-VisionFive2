@@ -6,9 +6,9 @@
  */
 
 #include "dwmmc.h"
-#include "assert.h"
+#include "../debug.h"
 #include "mmc.h"
-#include <errno.h>
+// #include <errno.h>
 
 #ifdef DRIVER_DWMMC
 
