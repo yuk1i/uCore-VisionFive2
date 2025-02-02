@@ -189,13 +189,16 @@ static inline uint64 r_time()
 // enable device interrupts
 static inline void intr_on()
 {
-	w_sstatus(r_sstatus() | SSTATUS_SIE);
+	// set SIE bit
+	asm volatile("csrrs x0, sstatus, %0":: "r"(SSTATUS_SIE));
+	// w_sstatus(r_sstatus() | SSTATUS_SIE);
 }
 
 // disable device interrupts
 static inline void intr_off()
 {
-	w_sstatus(r_sstatus() & ~SSTATUS_SIE);
+	asm volatile("csrrc x0, sstatus, %0":: "r"(SSTATUS_SIE));
+	// w_sstatus(r_sstatus() & ~SSTATUS_SIE);
 }
 
 // are device interrupts enabled?
