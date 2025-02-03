@@ -12,8 +12,6 @@ static int in_kerneltrap = 0;
 
 void kernel_trap(struct ktrapframe *ktf)
 {
-	print_sysregs(true);
-
 	if ((r_sstatus() & SSTATUS_SPP) == 0)
 		panic("kerneltrap: not from supervisor mode");
 
@@ -25,24 +23,12 @@ void kernel_trap(struct ktrapframe *ktf)
 		panic("nested kerneltrap");
 	in_kerneltrap = 1;
 
+	print_sysregs(true);
+	print_ktrapframe(ktf);
+
 	panic("trap from kernel");
 
-	// switch (cause) {
-	// case InstructionPageFault:
-	// case LoadPageFault:
-	// case StorePageFault: {
-	// 	uint64 addr = r_stval();
-	// 	pagetable_t pgt = SATP_TO_PGTABLE(r_satp());
-	// 	pte_t *pte = walk(pgt, addr, 0);
-	// 	if (pte == NULL)
-	// 		panic("kernel pagefault at %p", addr);
-	// 	if (cause == StorePageFault)
-	// 		*pte |= PTE_A | PTE_D;
-	// 	else
-	// 		*pte |= PTE_A;
-	// }
-	// default:
-	// }
+	in_kerneltrap = 0;
 }
 
 extern char kernel_trap_entry[];
