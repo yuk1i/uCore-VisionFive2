@@ -1,34 +1,24 @@
 #include "trap.h"
 #include "defs.h"
 #include "loader.h"
+#include "debug.h"
 #include "syscall.h"
 #include "timer.h"
 
 extern char trampoline[], uservec[];
 extern char userret[];
 
-void kerneltrap() __attribute__((aligned(16))) __attribute__((interrupt("supervisor")));
-// gcc will generate codes for context saving and restoring.
-
 static int in_kerneltrap = 0;
-void print_sysregs();
 
-void kerneltrap()
+void kernel_trap(struct ktrapframe *ktf)
 {
-	register uint64 *saved_regs;
-	asm volatile("mv %0, s0" : "=r"(saved_regs));
-	uint64 *gprs = saved_regs - 17;
-
-	printf("kernel trap: %p\n", saved_regs);
-	print_sysregs();
-	printf("ra: %p\n", gprs[17]);
-	printf("ra: %p\n", gprs[16]);
+	print_sysregs(true);
 
 	if ((r_sstatus() & SSTATUS_SPP) == 0)
 		panic("kerneltrap: not from supervisor mode");
 
-	uint64 cause = r_scause();
-	if (cause & (1ULL << 63))
+	uint64 scause = r_scause();
+	if (scause & SCAUSE_INTERRUPT)
 		panic("kerneltrap entered with interrupt scause");
 
 	if (in_kerneltrap)
@@ -55,9 +45,10 @@ void kerneltrap()
 	// }
 }
 
+extern char kernel_trap_entry[];
 void set_kerneltrap()
 {
-	w_stvec((uint64)kerneltrap & ~0x3); // DIRECT
+	w_stvec((uint64)kernel_trap_entry & ~0x3); // DIRECT
 }
 
 // set up to take exceptions and traps while in the kernel.
@@ -71,7 +62,6 @@ void unknown_trap()
 	errorf("unknown trap: %p, stval = %p", r_scause(), r_stval());
 	exit(-1);
 }
-
 
 //
 // handle an interrupt, exception, or system call from user space.
