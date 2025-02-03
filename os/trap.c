@@ -29,6 +29,7 @@ void kernel_trap(struct ktrapframe *ktf) {
         panic("kerneltrap: not from supervisor mode");
 
     if (mycpu()->inkernel_trap) {
+        // Prevent nested kernel trap, including nested interrupt, and exception during kernel_trap (called `Double Fault` in x86)
         print_sysregs(true);
         print_ktrapframe(ktf);
         panic("nested kerneltrap");
@@ -40,7 +41,7 @@ void kernel_trap(struct ktrapframe *ktf) {
     if (cause & SCAUSE_INTERRUPT) {
         switch (exception_code) {
             case SupervisorTimer:
-                tracef("kernel timer interrupt");
+                tracef("kernel timer interrupt, cycle: %d", r_time());
                 set_next_timer();
                 // we never preempt kernel threads.
                 goto free;

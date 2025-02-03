@@ -87,6 +87,10 @@ static void main_relocated2() {
 
         int ret = sbi_hsm_hart_start(i, KIVA_TO_PA(secondary_cpu_entry), 0x114514);
         printf(" = %d. waiting for hart online\n", ret);
+        if (ret < 0) {
+            printf("skipped for hart %d\n", i);
+            break;
+        }
 
         while (booted_count == booted_cnt);
     }
