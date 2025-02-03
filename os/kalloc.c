@@ -19,18 +19,18 @@ void freerange(void *kpgva_start, void *kpgva_end)
 	assert(PGALIGNED((uint64)kpgva_start));
 	assert(PGALIGNED((uint64)kpgva_end));
 
-	char *p;
-	p = (char *)PGROUNDUP((uint64)kpgva_start);
-	for (; p + PGSIZE <= (char *)kpgva_end; p += PGSIZE)
+	for (uint64 p = (uint64)kpgva_end - PGSIZE; p >= (uint64)kpgva_start; p -= PGSIZE)
 		kfreepage((void *)KVA_TO_PA(p));
 	kalloc_inited = 1;
 }
 
 extern uint64 __kva kpage_allocator_base;
 extern uint64 __kva kpage_allocator_size;
+static spinlock_t kpagelock;
 
 void kpgmgrinit()
 {
+	spinlock_init(&kpagelock, "pageallocator");
 	infof("page allocator init: base: %p, stop: %p", kpage_allocator_base, kpage_allocator_base + kpage_allocator_size);
 	freerange((void *)kpage_allocator_base, (void *)(kpage_allocator_base + kpage_allocator_size));
 }
@@ -43,16 +43,20 @@ void kfreepage(void *__pa pa)
 {
 	struct linklist *l;
 
+	acquire(&kpagelock);
+
 	uint64 __kva kvaddr = PA_TO_KVA(pa);
 	if (!PGALIGNED((uint64)pa) || !(kpage_allocator_base <= kvaddr && kvaddr < kpage_allocator_base + kpage_allocator_size))
 		panic("kfree: invalid page %p", pa);
 	// Fill with junk to catch dangling refs.
 	if (kalloc_inited)
-		infof("free : %p", pa);
+		debugf("free : %p", pa);
 	memset((void *)kvaddr, 0xdd, PGSIZE);
 	l = (struct linklist *)kvaddr;
 	l->next = kmem.freelist;
 	kmem.freelist = l;
+
+	release(&kpagelock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -63,13 +67,15 @@ void *__pa kallocpage()
 	uint64 ra;
 	asm volatile("mv %0, ra\n": "=r"(ra));
 	
+	acquire(&kpagelock);
 	struct linklist *l;
 	l = kmem.freelist;
 	if (l) {
 		kmem.freelist = l->next;
 		memset((char *)l, 0xaf, PGSIZE); // fill with junk
 	}
-	infof("alloc: %p, by %p", l, ra);
+	debugf("alloc: %p, by %p", l, ra);
+	release(&kpagelock);
 	return (void *)KVA_TO_PA((uint64)l);
 }
 
@@ -97,8 +103,9 @@ void allocator_init(struct allocator *alloc, char *name, uint64 object_size, uin
 	memset(alloc, 0, sizeof(*alloc));
 	// record basic properties of the allocator
 	alloc->name = name;
+	spinlock_init(&alloc->lock, "allocator");
 	alloc->object_size = object_size;
-	alloc->object_size_aligned = ROUNDUP_2N(object_size, 8);
+	alloc->object_size_aligned = ROUNDUP_2N(object_size, 16);
 	alloc->max_count = count;
 
 	assert(count <= PGSIZE * 8);
@@ -110,6 +117,8 @@ void allocator_init(struct allocator *alloc, char *name, uint64 object_size, uin
 	// calculate the pool base and end.
 	alloc->pool_base = allocator_mapped_va;
 	alloc->pool_end = alloc->pool_base + total_size;
+
+	infof("allocator %s inited base %p", name, alloc->pool_base);
 
 	// add a significant gap between different types of objects.
 	allocator_mapped_va += ROUNDUP_2N(total_size, KERNEL_ALLOCATOR_GAP);
@@ -141,6 +150,7 @@ void allocator_init(struct allocator *alloc, char *name, uint64 object_size, uin
 void *kalloc(struct allocator *alloc)
 {
 	assert(alloc);
+	acquire(&alloc->lock);
 	if (alloc->available_count == 0)
 		panic("unavailable");
 	alloc->available_count--;
@@ -148,10 +158,12 @@ void *kalloc(struct allocator *alloc)
 		if (!is_bit_set(alloc->bitmap, i)) {
 			bit_set(alloc->bitmap, i);
 			alloc->allocated_count++;
-			void* ret = (void *)alloc->pool_base + (i * alloc->object_size_aligned);
+			uint8* ret = (uint8 *)(alloc->pool_base + (i * alloc->object_size_aligned));
 			assert(alloc->allocated_count + alloc->available_count == alloc->max_count);
 			
 			memset(ret, 0xf9, alloc->object_size_aligned);
+			tracef("kalloc(%s) returns %p", alloc->name, ret);
+			release(&alloc->lock);
 			return ret;
 		}
 	}
@@ -162,6 +174,7 @@ void kfree(struct allocator *alloc, void *obj)
 {
 	if (obj == NULL)
 		return;
+	acquire(&alloc->lock);
 	assert(alloc);
 	assert(alloc->pool_base <= (uint64)obj && (uint64)obj < alloc->pool_end);
 
@@ -175,4 +188,5 @@ void kfree(struct allocator *alloc, void *obj)
 	alloc->available_count++;
 	assert(alloc->allocated_count + alloc->available_count == alloc->max_count);
 	memset(obj, 0xfa, alloc->object_size_aligned);
+	release(&alloc->lock);
 }

@@ -11,6 +11,7 @@ void *__pa kallocpage();
 
 typedef struct allocator {
     char * name;
+    spinlock_t lock;
 
     uint64 __kva pool_base;
     uint64 __kva pool_end;

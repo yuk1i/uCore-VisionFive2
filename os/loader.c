@@ -144,5 +144,6 @@ int load_init_app()
 		panic("fail to load init elf.");
 	}
 	add_task(p);
+	release(&p->lock);
 	return 0;
 }

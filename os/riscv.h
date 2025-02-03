@@ -3,6 +3,7 @@
 
 #include "types.h"
 
+<<<<<<< HEAD
 // which hart (core) is this?
 static inline uint64 r_mhartid() {
     uint64 x;
@@ -10,6 +11,8 @@ static inline uint64 r_mhartid() {
     return x;
 }
 
+=======
+>>>>>>> smp
 // Supervisor Status Register, sstatus
 
 #define SSTATUS_SUM (1L << 18)  // SUM (permit Supervisor User Memory access)
@@ -39,6 +42,7 @@ static inline void w_sip(uint64 x) {
 }
 
 // Supervisor Interrupt Enable
+<<<<<<< HEAD
 #define SIE_SEIE (1L << 9)  // external
 #define SIE_STIE (1L << 5)  // timer
 #define SIE_SSIE (1L << 1)  // software
@@ -50,6 +54,24 @@ static inline uint64 r_sie() {
 
 static inline void w_sie(uint64 x) {
     asm volatile("csrw sie, %0" : : "r"(x));
+=======
+#define SIE_SEIE (1L << 9) // external
+#define SIE_STIE (1L << 5) // timer
+#define SIE_SSIE (1L << 1) // software
+
+#define SIP_SSIE (1L << 1) // software
+
+static inline uint64 r_sie()
+{
+	uint64 x;
+	asm volatile("csrr %0, sie" : "=r"(x));
+	return x;
+}
+
+static inline void w_sie(uint64 x)
+{
+	asm volatile("csrw sie, %0" : : "r"(x));
+>>>>>>> smp
 }
 
 // machine exception program counter, holds the

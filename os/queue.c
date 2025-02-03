@@ -3,27 +3,35 @@
 
 void init_queue(struct queue *q)
 {
+	spinlock_init(&q->lock, "queue");
 	q->front = q->tail = 0;
 	q->empty = 1;
 }
 
-void push_queue(struct queue *q, int value)
+void push_queue(struct queue *q, void *data)
 {
+	acquire(&q->lock);
 	if (!q->empty && q->front == q->tail) {
 		panic("queue shouldn't be overflow");
 	}
 	q->empty = 0;
-	q->data[q->tail] = value;
+	q->data[q->tail] = data;
 	q->tail = (q->tail + 1) % NPROC;
+	release(&q->lock);
 }
 
-int pop_queue(struct queue *q)
+void *pop_queue(struct queue *q)
 {
-	if (q->empty)
-		return -1;
-	int value = q->data[q->front];
+	acquire(&q->lock);
+	if (q->empty) {
+		release(&q->lock);
+		return NULL;
+	}
+	
+	void *data = q->data[q->front];
 	q->front = (q->front + 1) % NPROC;
 	if (q->front == q->tail)
 		q->empty = 1;
-	return value;
+	release(&q->lock);
+	return data;
 }

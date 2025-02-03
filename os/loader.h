@@ -12,7 +12,6 @@ int load_user_elf(struct user_app *, struct proc *);
 
 #define USTACK_START 0xffff0000
 #define USTACK_SIZE (PAGE_SIZE * 8)
-#define KSTACK_SIZE (PAGE_SIZE)
 #define TRAP_PAGE_SIZE (PAGE_SIZE)
 
 struct user_app

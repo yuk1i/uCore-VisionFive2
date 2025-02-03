@@ -1,5 +1,6 @@
 #include "trap.h"
 #include "defs.h"
+#include "console.h"
 #include "loader.h"
 #include "debug.h"
 #include "syscall.h"
@@ -8,27 +9,65 @@
 extern char trampoline[], uservec[];
 extern char userret[];
 
-static int in_kerneltrap = 0;
+void plic_handle()
+{
+	int irq = plic_claim();
+	if (irq == UART0_IRQ) {
+		uart_intr();
+		// printf("intr %d: UART0\n", r_tp());
+	}
+
+	if (irq)
+		plic_complete(irq);
+}
 
 void kernel_trap(struct ktrapframe *ktf)
 {
+	assert(!intr_get());
+
 	if ((r_sstatus() & SSTATUS_SPP) == 0)
 		panic("kerneltrap: not from supervisor mode");
 
-	uint64 scause = r_scause();
-	if (scause & SCAUSE_INTERRUPT)
-		panic("kerneltrap entered with interrupt scause");
-
-	if (in_kerneltrap)
+	if (mycpu()->inkernel_trap) {
+		print_sysregs(true);
+		print_ktrapframe(ktf);
 		panic("nested kerneltrap");
-	in_kerneltrap = 1;
+	}
+	mycpu()->inkernel_trap = 1;
+
+	// in case some push_off/pop_off accidentally open the interrupt
+	int interrupt_save = mycpu()->interrupt_on;
+	mycpu()->interrupt_on = false;
+
+	uint64 cause = r_scause();
+	uint64 exception_code = cause & SCAUSE_EXCEPTION_CODE_MASK;
+	if (cause & SCAUSE_INTERRUPT) {
+		switch (exception_code) {
+		case SupervisorTimer:
+			tracef("kernel timer interrupt");
+			set_next_timer();
+			// we never preempt kernel threads.
+			goto free;
+		case SupervisorExternal:
+			tracef("s-external interrupt from kerneltrap!");
+			plic_handle();
+			goto free;
+		default:
+			panic("kerneltrap entered with unhandled interrupt. %p", cause);
+		}
+	}
 
 	print_sysregs(true);
 	print_ktrapframe(ktf);
 
 	panic("trap from kernel");
 
-	in_kerneltrap = 0;
+free:
+	assert(!intr_get());
+	
+	mycpu()->inkernel_trap = 0;
+	mycpu()->interrupt_on = interrupt_save;
+	return;
 }
 
 extern char kernel_trap_entry[];
@@ -56,6 +95,10 @@ void unknown_trap()
 void usertrap()
 {
 	set_kerneltrap();
+	// assert(mycpu()->interrupt_on == true);
+	assert(mycpu()->noff == 0);
+	assert(!intr_get());
+
 	struct trapframe *trapframe = curr_proc()->trapframe;
 	tracef("trap from user epc = %p", trapframe->epc);
 	// print_trapframe(trapframe);
@@ -72,6 +115,10 @@ void usertrap()
 			set_next_timer();
 			yield();
 			break;
+		case SupervisorExternal:
+			tracef("s-external interrupt from usertrap!");
+			plic_handle();
+			break;
 		default:
 			unknown_trap();
 			break;
@@ -80,7 +127,9 @@ void usertrap()
 		switch (cause) {
 		case UserEnvCall:
 			trapframe->epc += 4;
+			intr_on();
 			syscall();
+			intr_off();
 			break;
 		case LoadPageFault:
 		case StorePageFault:
@@ -123,9 +172,12 @@ void usertrap()
 //
 void usertrapret()
 {
+	if (intr_get())
+		panic("usertrapret entered with intr on");
+
 	struct trapframe *trapframe = curr_proc()->trapframe;
 	trapframe->kernel_satp = r_satp(); // kernel page table
-	trapframe->kernel_sp = curr_proc()->kstack + KSTACK_SIZE; // process's kernel stack
+	trapframe->kernel_sp = curr_proc()->kstack + KERNEL_STACK_SIZE; // process's kernel stack
 	trapframe->kernel_trap = (uint64)usertrap;
 	trapframe->kernel_hartid = r_tp(); // unuesd
 
@@ -144,6 +196,6 @@ void usertrapret()
 	uint64 stvec = (TRAMPOLINE + (uservec - trampoline)) & ~0x3;
 
 	uint64 fn = TRAMPOLINE + (userret - trampoline);
-	tracef("return to user @ %p, fn %p", trapframe->epc, fn);
+	tracef("return to user @%p, fn %p", trapframe->epc);
 	((void (*)(uint64, uint64, uint64))fn)(TRAPFRAME, satp, stvec);
 }

@@ -16,7 +16,7 @@ void timer_init()
 	set_next_timer();
 }
 
-/// Set the next timer interrupt
+// /// Set the next timer interrupt
 void set_next_timer()
 {
 	const uint64 timebase = CPU_FREQ / TICKS_PER_SEC;

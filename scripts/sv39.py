@@ -41,7 +41,7 @@ def calculate_vpn_and_offset(virtual_address):
 
 
 def decode_sv39_pte(pte):
-    ppn = (pte >> 9) & ((1 << 44) - 1) << 12  # PPN spans bits 10-53
+    ppn = (pte >> 10) << 12  # PPN spans bits 10-53
     v = pte & (1 << 0)
     r = pte & (1 << 1)
     w = pte & (1 << 2)

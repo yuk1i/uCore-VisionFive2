@@ -4,49 +4,76 @@
 #include "trap.h"
 #include "vm.h"
 #include "queue.h"
+#include "lock.h"
 
-static struct proc *pool[NPROC];
 // __attribute__((aligned(16))) char kstack[NPROC][PAGE_SIZE];
 // __attribute__((aligned(4096))) char trapframe[NPROC][TRAP_PAGE_SIZE];
 
 extern char boot_stack_top[];
-struct proc *current_proc;
-struct proc idle;
-struct queue task_queue;
+static struct proc *pool[NPROC];
+static struct proc *init_proc;
+static allocator_t proc_allocator;
+static struct queue task_queue;
+
+static int allocated_pid = 1;
+static spinlock_t lock_pid;
+
+static spinlock_t wait_lock;
+
+struct proc *curr_proc()
+{
+	// push_off();
+	struct cpu *cpu = mycpu();
+	struct proc *proc = cpu->proc;
+	// pop_off();
+	return proc;
+}
 
 int threadid()
 {
-	if (!current_proc)
+	if (!curr_proc())
 		return -1;
 	return curr_proc()->pid;
 }
 
-struct proc *curr_proc()
-{
-	return current_proc;
-}
-
-static allocator_t proc_allocator;
+static uint64 proc_kstack = KERNEL_STACK_PROCS;
+extern pagetable_t kernel_pagetable;
 
 // initialize the proc table at boot time.
 void proc_init()
 {
+	// we only init once.
+	static int proc_inited = 0;
+	assert(proc_inited == 0);
+	proc_inited = 1;
+
+	spinlock_init(&lock_pid, "pid");
+	spinlock_init(&wait_lock, "wait");
+
 	allocator_init(&proc_allocator, "proc", sizeof(struct proc), NPROC);
 	struct proc *p;
 
 	for (int i = 0; i < NPROC; i++) {
 		p = kalloc(&proc_allocator);
 		memset(p, 0, sizeof(*p));
+		spinlock_init(&p->lock, "proc");
 		p->index = i;
 		p->state = UNUSED;
-		p->kstack = PA_TO_KVA(kallocpage());
+
+		p->kstack = proc_kstack;
+		for (uint64 va = proc_kstack; va < proc_kstack + KERNEL_STACK_SIZE; va += PGSIZE) {
+			uint64 __pa newpg = (uint64)kallocpage();
+			kvmmap(kernel_pagetable, va, newpg, PGSIZE, PTE_A | PTE_D | PTE_R | PTE_W);
+		}
+		sfence_vma();
+		proc_kstack += 2 * KERNEL_STACK_SIZE;
+
 		p->trapframe = (struct trapframe *)PA_TO_KVA(kallocpage());
 		pool[i] = p;
 	}
-	idle.kstack = (uint64)boot_stack_top;
-	idle.pid = IDLE_PID;
-	current_proc = &idle;
 	init_queue(&task_queue);
+
+	init_proc = pool[0];
 }
 
 int allocpid()
@@ -57,22 +84,20 @@ int allocpid()
 
 struct proc *fetch_task()
 {
-	int index = pop_queue(&task_queue);
-	if (index < 0) {
-		debugf("No task to fetch\n");
-		return NULL;
-	}
-	debugf("fetch task %d(pid=%d) to task queue\n", index, pool[index]->pid);
-	return pool[index];
+	struct proc *proc = pop_queue(&task_queue);
+	if (proc != NULL)
+		debugf("fetch task (pid=%d) from task queue", proc->pid);
+	return proc;
 }
 
 void add_task(struct proc *p)
 {
-	push_queue(&task_queue, p->index);
-	debugf("add task %d(pid=%d) to task queue\n", p->index, p->pid);
+	push_queue(&task_queue, p);
+	debugf("add task (pid=%d) to task queue", p->pid);
 }
 
 extern char trampoline[];
+static void first_sched_ret(void);
 
 // Look in the process table for an UNUSED proc.
 // If found, initialize state required to run in the kernel.
@@ -82,14 +107,16 @@ struct proc *allocproc()
 	struct proc *p;
 	for (int i = 0; i < NPROC; i++) {
 		p = pool[i];
+		acquire(&p->lock);
 		if (p->state == UNUSED) {
 			goto found;
 		}
+		release(&p->lock);
 	}
 	return 0;
 
 found:
-	// init proc
+	// initialize a proc
 	tracef("init proc %p", p);
 	p->pid = allocpid();
 	p->state = USED;
@@ -108,11 +135,37 @@ found:
 	p->parent = NULL;
 	p->exit_code = 0;
 	memset(&p->context, 0, sizeof(p->context));
-	memset((void *)p->kstack, 0, KSTACK_SIZE);
+	memset((void *)p->kstack, 0, KERNEL_STACK_SIZE);
 	memset((void *)p->trapframe, 0, TRAP_PAGE_SIZE);
-	p->context.ra = (uint64)usertrapret;
-	p->context.sp = p->kstack + KSTACK_SIZE;
+	p->context.ra = (uint64)first_sched_ret;
+	p->context.sp = p->kstack + KERNEL_STACK_SIZE;
+
+	assert(holding(&p->lock));
 	return p;
+}
+
+static void first_sched_ret(void)
+{
+	release(&curr_proc()->lock);
+	intr_off();
+	usertrapret();
+}
+
+static int all_dead()
+{
+	push_off();
+	int alive = 0;
+	for (int i = 0; i < NPROC; i++) {
+		struct proc *p = pool[i];
+		acquire(&p->lock);
+		if (p->state != UNUSED)
+			alive = true;
+		release(&p->lock);
+		if (alive)
+			break;
+	}
+	pop_off();
+	return !alive;
 }
 
 // Scheduler never returns.  It loops, doing:
@@ -123,28 +176,48 @@ found:
 void scheduler()
 {
 	struct proc *p;
+	struct cpu *c = mycpu();
+
+	// We only get here once.
+	// After each cpu boots, it calls scheduler().
+	// If this scheduler finds any possible process to run, it will switch to it.
+	// 	And the scheduler context is saved on "mycpu()->sched_context"
+
 	for (;;) {
-		/*int has_proc = 0;
-		for (p = pool; p < &pool[NPROC]; p++) {
-			if (p->state == RUNNABLE) {
-				has_proc = 1;
-				tracef("swtich to proc %d", p - pool);
-				p->state = RUNNING;
-				current_proc = p;
-				swtch(&idle.context, &p->context);
-			}
-		}
-		if(has_proc == 0) {
-			panic("all app are over!\n");
-		}*/
+		// intr may be on here.
+
 		p = fetch_task();
 		if (p == NULL) {
-			panic("all app are over!\n");
+			// if we cannot find a process in the task_queue
+			//  maybe some processes are SLEEPING and some are RUNNABLE
+			if (all_dead()) {
+				panic("[cpu %d] scheduler dead.", c->cpuid);
+			} else {
+				// nothing to run; stop running on this core until an interrupt.
+				intr_on();
+				asm volatile("wfi");
+				intr_off();
+				continue;
+			}
 		}
-		infof("swtich to proc %d(%d)", p->index, p->pid);
+
+		acquire(&p->lock);
+		assert(p->state == RUNNABLE);
+		infof("switch to proc %d(%d)", p->index, p->pid);
 		p->state = RUNNING;
-		current_proc = p;
-		swtch(&idle.context, &p->context);
+		c->proc = p;
+		swtch(&c->sched_context, &p->context);
+
+		// When we get back here, someone must have called swtch(..., &c->sched_context);
+		assert(c->proc == p);
+		assert(!intr_get()); // scheduler should never have intr_on()
+		assert(holding(&p->lock)); // whoever switch to us must acquire p->lock
+		c->proc = NULL;
+
+		if (p->state == RUNNABLE) {
+			add_task(p);
+		}
+		release(&p->lock);
 	}
 }
 
@@ -157,56 +230,128 @@ void scheduler()
 // there's no process.
 void sched()
 {
+	int interrupt_on;
 	struct proc *p = curr_proc();
+
+	if (!holding(&p->lock))
+		panic("not holding p->lock");
+	if (mycpu()->noff != 1)
+		panic("holding another locks");
 	if (p->state == RUNNING)
-		panic("sched running");
-	swtch(&p->context, &idle.context);
+		panic("sched running process");
+	if (mycpu()->inkernel_trap)
+		panic("sched should never be called in kernel trap context.");
+	assert(!intr_get());
+
+	interrupt_on = mycpu()->interrupt_on;
+	debugf("switch to scheduler %d(%d)", p->index, p->pid);
+	swtch(&p->context, &mycpu()->sched_context);
+	mycpu()->interrupt_on = interrupt_on;
+
+	// if scheduler returns here: p->lock must be holding.
+	if (!holding(&p->lock))
+		panic("not holding p->lock after sched.swtch returns");
 }
 
 // Give up the CPU for one scheduling round.
 void yield()
 {
-	current_proc->state = RUNNABLE;
-	add_task(current_proc);
+	struct proc *p = curr_proc();
+	debugf("yield: (%d)%p", p->pid, p);
+
+	acquire(&p->lock);
+	p->state = RUNNABLE;
 	sched();
+	release(&p->lock);
 }
 
 void freeproc(struct proc *p)
 {
+	assert(holding(&p->lock));
+
+	p->state = UNUSED;
+	p->pid = -1;
+	p->exit_code = 0xdeadbeef;
+	p->sleep_chan = NULL;
+	p->killed = 0;
+	p->parent = NULL;
+
 	freevma(p->vma_trampoline, false);
 	freevma(p->vma_trapframe, true);
 	p->vma_trampoline = NULL;
 	p->vma_trapframe = NULL;
-	if (p->mm)
-		mm_free(p->mm);
+	mm_free(p->mm);
 	p->vma_brk = NULL;
 	p->vma_ustack = NULL;
-	p->state = UNUSED;
+}
+
+void sleep(void *chan, spinlock_t *lk)
+{
+	struct proc *p = curr_proc();
+
+	// Must acquire p->lock in order to
+	// change p->state and then call sched.
+	// Once we hold p->lock, we can be
+	// guaranteed that we won't miss any wakeup
+	// (wakeup locks p->lock),
+	// so it's okay to release lk.
+
+	acquire(&p->lock); //DOC: sleeplock1
+	release(lk);
+
+	// Go to sleep.
+	p->sleep_chan = chan;
+	p->state = SLEEPING;
+
+	sched();
+
+	// p get waking up, Tidy up.
+	p->sleep_chan = 0;
+
+	// Reacquire original lock.
+	release(&p->lock);
+	acquire(lk);
+}
+
+void wakeup(void *chan)
+{
+	for (int i = 0; i < NPROC; i++) {
+		struct proc *p = pool[i];
+		acquire(&p->lock);
+		if (p->state == SLEEPING && p->sleep_chan == chan) {
+			p->state = RUNNABLE;
+			add_task(p);
+		}
+		release(&p->lock);
+	}
 }
 
 int fork()
 {
 	struct proc *np;
-	struct proc *p = curr_proc();
 	// Allocate process.
 	if ((np = allocproc()) == NULL) {
-		panic("allocproc\n");
+		panic("allocproc");
 	}
-	if (mm_copy(p->mm, np->mm)) {
-		panic("mm_copy");
-	}
+
+	struct proc *p = curr_proc();
+	acquire(&p->lock);
+
 	// Copy user memory from parent to child.
-	// if (uvmcopy(p->pagetable, np->pagetable, PGROUNDUP(p->program_brk) / PGSIZE) < 0) {
-	// 	panic("uvmcopy\n");
-	// }
-	// np->program_brk = p->program_brk;
+	if (mm_copy(p->mm, np->mm))
+		panic("mm_copy");
+
 	// copy saved user registers.
 	*(np->trapframe) = *(p->trapframe);
+
 	// Cause fork to return 0 in the child.
 	np->trapframe->a0 = 0;
 	np->parent = p;
 	np->state = RUNNABLE;
 	add_task(np);
+	release(&np->lock);
+	release(&p->lock);
+
 	return np->pid;
 }
 
@@ -216,43 +361,62 @@ int exec(char *name)
 	if (app == NULL)
 		return -1;
 	struct proc *p = curr_proc();
+
+	acquire(&p->lock);
+
 	// execve does not preserve memory mappings:
 	//  free memory below program_brk, and ustack
 	//  but keep trapframe and trampoline, because it belongs to curr_proc().
 	mm_free_pages(p->mm);
 
 	load_user_elf(app, p);
+
+	release(&p->lock);
 	return 0;
 }
 
 int wait(int pid, int *code)
 {
-	struct proc *np;
+	struct proc *child;
 	int havekids;
 	struct proc *p = curr_proc();
+
+	acquire(&wait_lock);
 
 	for (;;) {
 		// Scan through table looking for exited children.
 		havekids = 0;
 		for (int i = 0; i < NPROC; i++) {
-			np = pool[i];
-			if (np->state != UNUSED && np->parent == p && (pid <= 0 || np->pid == pid)) {
+			child = pool[i];
+			if (child == p)
+				continue;
+
+			acquire(&child->lock);
+			if (child->parent == p) {
 				havekids = 1;
-				if (np->state == ZOMBIE) {
+				if (child->state == ZOMBIE && (pid <= 0 || child->pid == pid)) {
+					int cpid = child->pid;
 					// Found one.
-					np->state = UNUSED;
-					pid = np->pid;
-					*code = np->exit_code;
-					return pid;
+					if (code)
+						*code = child->exit_code;
+					freeproc(child);
+					release(&child->lock);
+					release(&wait_lock);
+					return cpid;
 				}
 			}
+			release(&child->lock);
 		}
-		if (!havekids) {
+
+		// No waiting if we don't have any children.
+		if (!havekids || p->killed) {
+			release(&wait_lock);
 			return -1;
 		}
-		p->state = RUNNABLE;
-		add_task(p);
-		sched();
+
+		infof("pid %d sleeps for wait", p->pid);
+		// Wait for a child to exit.
+		sleep(p, &wait_lock); //DOC: wait-sleep
 	}
 }
 
@@ -260,22 +424,33 @@ int wait(int pid, int *code)
 void exit(int code)
 {
 	struct proc *p = curr_proc();
-	p->exit_code = code;
-	debugf("proc %d exit with %d\n", p->pid, code);
-	freeproc(p);
-	if (p->parent != NULL) {
-		// Parent should `wait`
-		p->state = ZOMBIE;
-	}
-	// Set the `parent` of all children to NULL
-	struct proc *np;
+
+	acquire(&wait_lock);
+
+	// wakeup wait-ing parent.
+	//  There is no race because locking against "wait_lock"
+	wakeup(p->parent);
+
+	acquire(&p->lock);
+
+	// reparent
 	for (int i = 0; i < NPROC; i++) {
-		np = pool[i];
-		if (np->parent == p) {
-			np->parent = NULL;
-		}
+		struct proc *np = pool[i];
+		if (np == p)
+			continue;
+		acquire(&np->lock);
+		if (np->parent == p)
+			np->parent = init_proc;
+		release(&np->lock);
 	}
+
+	p->exit_code = code;
+	p->state = ZOMBIE;
+
+	release(&wait_lock);
+
 	sched();
+	panic("exit should never return");
 }
 
 // Grow or shrink user memory by n bytes.
@@ -284,19 +459,5 @@ int growproc(int n)
 {
 	uint64 program_brk;
 	panic("qwq");
-	// struct proc *p = curr_proc();
-	// program_brk = p->program_brk;
-	// int64 new_brk = program_brk + n;
-	// if (new_brk < 0) {
-	// 	return -1;
-	// }
-	// if (n > 0) {
-	// 	if ((program_brk = uvmalloc(p->pagetable, program_brk, program_brk + n, PTE_W)) == 0) {
-	// 		return -1;
-	// 	}
-	// } else if (n < 0) {
-	// 	program_brk = uvmdealloc(p->pagetable, program_brk, program_brk + n);
-	// }
-	// p->program_brk = program_brk;
 	return 0;
 }
