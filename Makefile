@@ -115,6 +115,9 @@ QEMUOPTS = \
 run: build/kernel
 	$(QEMU) $(QEMUOPTS)
 
+runsmp: build/kernel
+	$(QEMU) -smp 4 $(QEMUOPTS)
+
 # QEMU's gdb stub command line changed in 0.11
 QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::3333"; \

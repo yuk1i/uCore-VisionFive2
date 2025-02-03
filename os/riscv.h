@@ -3,22 +3,11 @@
 
 #include "types.h"
 
-<<<<<<< HEAD
-// which hart (core) is this?
-static inline uint64 r_mhartid() {
-    uint64 x;
-    asm volatile("csrr %0, mhartid" : "=r"(x));
-    return x;
-}
-
-=======
->>>>>>> smp
 // Supervisor Status Register, sstatus
-
-#define SSTATUS_SUM (1L << 18)  // SUM (permit Supervisor User Memory access)
-#define SSTATUS_SPP  (1L << 8)  // Previous mode, 1=Supervisor, 0=User
-#define SSTATUS_SPIE (1L << 5)  // Supervisor Previous Interrupt Enable
-#define SSTATUS_SIE  (1L << 1)  // Supervisor Interrupt Enable
+#define SSTATUS_SUM  (1L << 18)  // SUM (permit Supervisor User Memory access)
+#define SSTATUS_SPP  (1L << 8)   // Previous mode, 1=Supervisor, 0=User
+#define SSTATUS_SPIE (1L << 5)   // Supervisor Previous Interrupt Enable
+#define SSTATUS_SIE  (1L << 1)   // Supervisor Interrupt Enable
 
 static inline uint64 r_sstatus() {
     uint64 x;
@@ -42,7 +31,6 @@ static inline void w_sip(uint64 x) {
 }
 
 // Supervisor Interrupt Enable
-<<<<<<< HEAD
 #define SIE_SEIE (1L << 9)  // external
 #define SIE_STIE (1L << 5)  // timer
 #define SIE_SSIE (1L << 1)  // software
@@ -54,24 +42,6 @@ static inline uint64 r_sie() {
 
 static inline void w_sie(uint64 x) {
     asm volatile("csrw sie, %0" : : "r"(x));
-=======
-#define SIE_SEIE (1L << 9) // external
-#define SIE_STIE (1L << 5) // timer
-#define SIE_SSIE (1L << 1) // software
-
-#define SIP_SSIE (1L << 1) // software
-
-static inline uint64 r_sie()
-{
-	uint64 x;
-	asm volatile("csrr %0, sie" : "=r"(x));
-	return x;
-}
-
-static inline void w_sie(uint64 x)
-{
-	asm volatile("csrw sie, %0" : : "r"(x));
->>>>>>> smp
 }
 
 // machine exception program counter, holds the
@@ -154,9 +124,11 @@ static inline void intr_on() {
     // w_sstatus(r_sstatus() | SSTATUS_SIE);
 }
 
-// disable device interrupts
-static inline void intr_off() {
-    asm volatile("csrrc x0, sstatus, %0" ::"r"(SSTATUS_SIE));
+// disable device interrupts, return whether it opens before off.
+static inline int64 intr_off() {
+    uint64 prev;
+    asm volatile("csrrc %0, sstatus, %1" : "=r"(prev) : "r"(SSTATUS_SIE));
+    return (prev & SSTATUS_SIE) != 0;
     // w_sstatus(r_sstatus() & ~SSTATUS_SIE);
 }
 

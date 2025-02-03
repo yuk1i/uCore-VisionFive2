@@ -11,7 +11,8 @@
 
 BasedOnStyle: Google
 IndentWidth: 4
-ColumnLimit: 100
+UseTab: Never
+ColumnLimit: 180
 MaxEmptyLinesToKeep: 1
 
 DerivePointerAlignment: true
@@ -23,11 +24,11 @@ AllowShortBlocksOnASingleLine: false
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowShortIfStatementsOnASingleLine: Never
 AlwaysBreakTemplateDeclarations: Yes
+AlignAfterOpenBracket: Align
+BinPackArguments: false
+
 
 AlignConsecutiveAssignments:
   Enabled: true
-  AcrossEmptyLines: true
+  AcrossEmptyLines: false
   AcrossComments: false
-
-AlignAfterOpenBracket: Align
-BinPackArguments: false

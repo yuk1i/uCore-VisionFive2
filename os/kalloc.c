@@ -31,7 +31,7 @@ static spinlock_t kpagelock;
 void kpgmgrinit()
 {
 	spinlock_init(&kpagelock, "pageallocator");
-	infof("page allocator init: base: %p, stop: %p", kpage_allocator_base, kpage_allocator_base + kpage_allocator_size);
+	infof("init: base: %p, stop: %p", kpage_allocator_base, kpage_allocator_base + kpage_allocator_size);
 	freerange((void *)kpage_allocator_base, (void *)(kpage_allocator_base + kpage_allocator_size));
 }
 

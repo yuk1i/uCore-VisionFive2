@@ -31,7 +31,7 @@ static uint64 __kva allocsetuppage()
 
 	uint64 __kva pg = init_page_allocator;
 	init_page_allocator += PGSIZE;
-	infof("%p", pg);
+	debugf("%p", pg);
 	return pg;
 }
 
@@ -98,7 +98,7 @@ static pagetable_t kvmmake()
 		// allocate #KERNEL_STACK_SIZE / PGSIZE pages
 		for (uint64 va = sched_stack; va < sched_stack + KERNEL_STACK_SIZE; va += PGSIZE) {
 			uint64 __pa newpg = KVA_TO_PA(allockernelpage());
-			infof("map halt %d, va:%p, pa:%p", i, va, newpg);
+			debugf("map halt %d, va:%p, pa:%p", i, va, newpg);
 			kvmmap(kpgtbl, va, newpg, PGSIZE, PTE_A | PTE_D | PTE_R | PTE_W | PTE_G);
 		}
 		c->sched_kstack_top = sched_stack + KERNEL_STACK_SIZE;
@@ -123,7 +123,9 @@ static pagetable_t kvmmake()
 	kpage_allocator_base = init_page_allocator;
 	kpage_allocator_size = available_mems - (init_page_allocator - init_page_allocator_base);
 
+#ifdef LOG_LEVEL_DEBUG
 	vm_print(kpgtbl);
+#endif
 
 	// VisionFive2 Notes:
 	// 	if PTE_A is not set here, it will trigger an instruction page fault scause 0xc for the first time-accesses.
@@ -148,7 +150,7 @@ void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 	assert(PGALIGNED(pa));
 	assert(PGALIGNED(sz));
 
-	infof("va:%p, pa:%p, sz:%x", va, pa, sz);
+	debugf("va:%p, pa:%p, sz:%x", va, pa, sz);
 
 	pagetable_t __kva pgtbl_level1, pgtbl_level0;
 	uint64 vpn2, vpn1, vpn0;
