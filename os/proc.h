@@ -80,6 +80,8 @@ static inline struct proc *curr_proc() {
 }
 
 // proc.c
+extern struct proc *init_proc;
+
 void proc_init();
 struct proc *allocproc();
 int fork();

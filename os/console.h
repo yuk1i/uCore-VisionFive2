@@ -11,8 +11,6 @@ void console_init();
 int64 user_console_write(uint64 __user buf, int64 len);
 int64 user_console_read(uint64 __user buf, int64 n);
 
-#define UART0_IRQ  10
-
 // the UART control registers are memory-mapped
 // at address UART0. this macro returns the
 // address of one of the registers.

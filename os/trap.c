@@ -7,12 +7,18 @@
 #include "syscall.h"
 #include "timer.h"
 #include "defs.h"
+#include "fs/virtio.h"
+
 
 void plic_handle() {
     int irq = plic_claim();
     if (irq == UART0_IRQ) {
         uart_intr();
         // printf("intr %d: UART0\n", r_tp());
+    } else if (irq == VIRTIO0_IRQ) {
+        virtio_disk_intr();
+    } else {
+        warnf("plic sends unexpected IRQ %d", irq);
     }
 
     if (irq)

@@ -19,11 +19,11 @@
 // clang-format on
 
 // Kernel defines
-#define ENABLE_SMP     (1)
-#define NCPU           (4)
-#define NPROC          (512)
-#define FD_BUFFER_SIZE (16)
-#define PHYS_MEM_SIZE  (64ull * 1024 * 1024)
+#define ENABLE_SMP    1
+#define NCPU          4
+#define NPROC         512
+#define BSIZE         4096
+#define PHYS_MEM_SIZE (64ull * 1024 * 1024)
 
 // Common macros
 #define MIN(a, b)      (a < b ? a : b)

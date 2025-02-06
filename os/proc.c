@@ -5,9 +5,10 @@
 #include "trap.h"
 #include "kalloc.h"
 #include "loader.h"
+#include "fs/fs.h"
 
 struct proc *pool[NPROC];
-static struct proc *init_proc;
+struct proc *init_proc;
 static allocator_t proc_allocator;
 
 static spinlock_t pid_lock;
@@ -50,7 +51,14 @@ void proc_init() {
     }
     sched_init();
 
-    init_proc = pool[0];
+    init_proc = NULL;
+
+    // we do the fs init through the init_proc.
+    struct proc* fsinit = allocproc();
+    fsinit->context.ra = (uint64)fs_init;
+    fsinit->state = RUNNABLE;
+    release(&fsinit->lock);
+    add_task(fsinit);
 }
 
 static int allocpid() {
@@ -63,7 +71,7 @@ static int allocpid() {
 
     return retpid;
 }
- static void first_sched_ret(void) {
+ static void first_sched_userret(void) {
     release(&curr_proc()->lock);
     intr_off();
     usertrapret();
@@ -106,7 +114,7 @@ found:
     memset(&p->context, 0, sizeof(p->context));
     memset((void *)p->kstack, 0, KERNEL_STACK_SIZE);
     memset((void *)p->trapframe, 0, PGSIZE);
-    p->context.ra = (uint64)first_sched_ret;
+    p->context.ra = (uint64)first_sched_userret;
     p->context.sp = p->kstack + KERNEL_STACK_SIZE;
 
     assert(holding(&p->lock));

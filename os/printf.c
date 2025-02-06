@@ -15,7 +15,7 @@ static void printint(int xx, int base, int sign) {
     int i;
     uint x;
 
-    if (sign && (sign = xx < 0))
+    if (sign == 1 && xx < 0)
         x = -xx;
     else
         x = xx;
@@ -25,8 +25,12 @@ static void printint(int xx, int base, int sign) {
         buf[i++] = digits[x % base];
     } while ((x /= base) != 0);
 
-    if (sign)
+    if (sign == 1 && xx < 0)
         buf[i++] = '-';
+    else if (sign < 0) {
+        // padding with '0' for hex.
+        while (i < -sign) buf[i++] = '0';
+    }
 
     while (--i >= 0) consputc(buf[i]);
 }
@@ -68,6 +72,9 @@ void printf(char *fmt, ...) {
                 break;
             case 'x':
                 printint(va_arg(ap, int), 16, 1);
+                break;
+            case 'X':
+                printint(va_arg(ap, int), 16, -2);
                 break;
             case 'p':
                 printptr(va_arg(ap, uint64));
