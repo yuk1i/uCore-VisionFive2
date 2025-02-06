@@ -2,14 +2,11 @@
 
 #include "console.h"
 #include "debug.h"
-#include "defs.h"
 #include "loader.h"
+#include "plic.h"
 #include "syscall.h"
 #include "timer.h"
-#include "vm.h"
-
-extern char trampoline[], uservec[];
-extern char userret[];
+#include "defs.h"
 
 void plic_handle() {
     int irq = plic_claim();
@@ -65,7 +62,6 @@ free:
     return;
 }
 
-extern char kernel_trap_entry[];
 void set_kerneltrap() {
     assert(IS_ALIGNED((uint64)kernel_trap_entry, 4));
     w_stvec((uint64)kernel_trap_entry);  // DIRECT

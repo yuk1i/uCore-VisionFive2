@@ -1,6 +1,6 @@
 #include "debug.h"
 
-#include "log.h"
+#include "defs.h"
 
 void print_trapframe(struct trapframe *tf) {
     printf("trapframe at %p\n", tf);

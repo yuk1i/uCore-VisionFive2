@@ -12,8 +12,8 @@ void timer_init();
 void set_next_timer();
 
 typedef struct {
-	uint64 sec; // 自 Unix 纪元起的秒数
-	uint64 usec; // 微秒数
+    uint64 sec;   // 自 Unix 纪元起的秒数
+    uint64 usec;  // 微秒数
 } TimeVal;
 
-#endif // TIMER_H
+#endif  // TIMER_H

@@ -1,8 +1,7 @@
 #include "vm.h"
+
 #include "defs.h"
-#include "lock.h"
-#include "riscv.h"
-#include "debug.h"
+#include "kalloc.h"
 
 allocator_t mm_allocator;
 allocator_t vma_allocator;

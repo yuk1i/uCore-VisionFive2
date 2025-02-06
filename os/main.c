@@ -1,19 +1,12 @@
-#include "console.h"
 #include "debug.h"
 #include "defs.h"
+#include "kalloc.h"
 #include "loader.h"
+#include "plic.h"
 #include "timer.h"
-#include "trap.h"
+#include "sbi.h"
+#include "console.h"
 
-extern char e_text[];  // kernel.ld sets this to end of kernel code.
-extern char s_bss[];
-extern char e_bss[];
-extern char ekernel[], skernel[];
-extern char boot_stack_top[];
-extern char secondary_cpu_entry[];
-
-#define KIVA_TO_PA(x) (((uint64)(x)) - KERNEL_OFFSET)
-#define PA_TO_KIVA(x) (((uint64)(x)) + KERNEL_OFFSET)
 
 uint64 __pa kernel_image_end_4k;
 uint64 __pa kernel_image_end_2M;
@@ -42,7 +35,6 @@ uint64 read_pc() {
 void main(int mhartid) {
     w_tp(mhartid);
 
-    extern char boot_stack[];
     printf("\n\n=====\nHello World!\n=====\n\nBoot stack: %p\nclean bss: %p - %p\n", boot_stack, s_bss, e_bss);
     memset(s_bss, 0, e_bss - s_bss);
     printf("Boot cpuid 0, mhartid %d\n", mhartid);
@@ -68,10 +60,8 @@ static void main_relocated() {
     main_relocated2();
 }
 
-static volatile int booted_count = 0;
+static volatile int booted_count       = 0;
 static volatile int halt_specific_init = 0;
-
-#define ENABLE_SMP 1
 
 static void main_relocated2() {
     printf("Relocated. Boot halt sp at %p\n", r_sp());
@@ -176,13 +166,13 @@ static void relocation_start() {
     memset(relocate_pagetable_level1_direct_mapping, 0, PGSIZE);
     memset(relocate_pagetable_level1_high, 0, PGSIZE);
 
-    pagetable_t pgt_root = (pagetable_t)relocate_pagetable;
-    pagetable_t pgt_ident = (pagetable_t)relocate_pagetable_level1_ident;
-    pagetable_t pgt_direct = (pagetable_t)relocate_pagetable_level1_direct_mapping;
+    pagetable_t pgt_root    = (pagetable_t)relocate_pagetable;
+    pagetable_t pgt_ident   = (pagetable_t)relocate_pagetable_level1_ident;
+    pagetable_t pgt_direct  = (pagetable_t)relocate_pagetable_level1_direct_mapping;
     pagetable_t pgt_kernimg = (pagetable_t)relocate_pagetable_level1_high;
 
     // Calculate Kernel image size, and round up to 2MiB.
-    uint64 kernel_size = (uint64)ekernel - (uint64)skernel;
+    uint64 kernel_size    = (uint64)ekernel - (uint64)skernel;
     uint64 kernel_size_4K = ROUNDUP_2N(kernel_size, PGSIZE);
     uint64 kernel_size_2M = ROUNDUP_2N(kernel_size, PGSIZE_2M);
 
@@ -193,29 +183,26 @@ static void relocation_start() {
 
     // Calculate Kernel Mapping Base & End
     uint64 kernel_phys_base = KERNEL_PHYS_BASE;
-    uint64 kernel_phys_end = kernel_phys_base + kernel_size_2M;
+    uint64 kernel_phys_end  = kernel_phys_base + kernel_size_2M;
     uint64 kernel_virt_base = KERNEL_VIRT_BASE;
-    uint64 kernel_virt_end = kernel_virt_base + kernel_size_2M;
+    uint64 kernel_virt_end  = kernel_virt_base + kernel_size_2M;
 
     // Calculate the first Direct Mapping Base & End
     uint64 kernel_la_phy_base = kernel_image_end_2M;
-    uint64 kernel_la_base = KERNEL_DIRECT_MAPPING_BASE + kernel_la_phy_base;
-    uint64 kernel_la_end = kernel_la_base + PGSIZE_2M;
+    uint64 kernel_la_base     = KERNEL_DIRECT_MAPPING_BASE + kernel_la_phy_base;
+    uint64 kernel_la_end      = kernel_la_base + PGSIZE_2M;
 
-    infof("Kernel phy_base: %p, phy_end_4k:%p, phy_end_2M %p",
-          kernel_phys_base,
-          kernel_image_end_4k,
-          kernel_phys_end);
+    infof("Kernel phy_base: %p, phy_end_4k:%p, phy_end_2M %p", kernel_phys_base, kernel_image_end_4k, kernel_phys_end);
 
     // We will still have some instructions executed on pc 0x8020xxxx before jumping to KIVA.
     // Step 2. Setup Identity Mapping for 0x80200000 -> 0x80200000, using 2MiB huge page.
     {
-        uint64 VPN2 = PX(2, kernel_phys_base);
+        uint64 VPN2    = PX(2, kernel_phys_base);
         pgt_root[VPN2] = MAKE_PTE((uint64)pgt_ident, 0);
 
         for (uint64 pa = kernel_phys_base; pa < kernel_phys_end; pa += PGSIZE_2M) {
-            uint64 va = pa;
-            uint64 vpn1 = PX(1, va);
+            uint64 va       = pa;
+            uint64 vpn1     = PX(1, va);
             pgt_ident[vpn1] = MAKE_PTE(pa, PTE_R | PTE_W | PTE_X | PTE_A | PTE_D);
             printf("Mapping Identity: %p to %p\n", va, pa);
         }
@@ -223,12 +210,12 @@ static void relocation_start() {
 
     // Step 3. Setup Kernel Image Mapping at high address
     {
-        uint64 vpn2 = PX(2, kernel_virt_base);
+        uint64 vpn2    = PX(2, kernel_virt_base);
         pgt_root[vpn2] = MAKE_PTE((uint64)pgt_kernimg, 0);
 
         for (uint64 pa = kernel_phys_base; pa < kernel_phys_end; pa += PGSIZE_2M) {
-            uint64 va = pa + KERNEL_OFFSET;
-            uint64 vpn1 = PX(1, va);
+            uint64 va         = pa + KERNEL_OFFSET;
+            uint64 vpn1       = PX(1, va);
             pgt_kernimg[vpn1] = MAKE_PTE(pa, PTE_R | PTE_W | PTE_X | PTE_A | PTE_D);
             printf("Mapping kernel image: %p to %p\n", va, pa);
         }
@@ -238,9 +225,9 @@ static void relocation_start() {
     {
         // This Direct Mapping area is used in kvmmake.
         // Only map one 2MiB [kernel_la_base - kernel_la_end]
-        uint64 vpn2 = PX(2, kernel_la_base);
-        pgt_root[vpn2] = MAKE_PTE((uint64)pgt_direct, 0);
-        uint64 vpn1 = PX(1, kernel_la_base);
+        uint64 vpn2      = PX(2, kernel_la_base);
+        pgt_root[vpn2]   = MAKE_PTE((uint64)pgt_direct, 0);
+        uint64 vpn1      = PX(1, kernel_la_base);
         pgt_direct[vpn1] = MAKE_PTE(kernel_la_phy_base, PTE_R | PTE_W | PTE_A | PTE_D);
         printf("Mapping Direct Mapping: %p to %p\n", kernel_la_base, kernel_la_phy_base);
     }
@@ -254,7 +241,7 @@ static void relocation_start() {
     w_satp(MAKE_SATP(pgt_root));
     sfence_vma();
 
-    uint64 jump = (uint64)&main_relocated + KERNEL_OFFSET;
+    uint64 jump   = (uint64)&main_relocated + KERNEL_OFFSET;
     uint64 new_sp = (uint64)&boot_stack_top + KERNEL_OFFSET;
 
     asm volatile("mv a1, %0\n" ::"r"(jump));

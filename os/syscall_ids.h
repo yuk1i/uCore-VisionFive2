@@ -1,3 +1,5 @@
+// This file is shared by Kernel and User-space application.
+
 #define SYS_io_setup 0
 #define SYS_io_destroy 1
 #define SYS_io_submit 2

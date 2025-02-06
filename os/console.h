@@ -1,7 +1,8 @@
 #ifndef CONSOLE_H
 #define CONSOLE_H
 
-#include "const.h"
+#include "types.h"
+#include "memlayout.h"
 #include "vm.h"
 
 void consputc(int);
@@ -10,6 +11,7 @@ void console_init();
 int64 user_console_write(uint64 __user buf, int64 len);
 int64 user_console_read(uint64 __user buf, int64 n);
 
+#define UART0_IRQ  10
 
 // the UART control registers are memory-mapped
 // at address UART0. this macro returns the
@@ -38,7 +40,5 @@ int64 user_console_read(uint64 __user buf, int64 n);
 
 #define ReadReg(reg) (*(Reg(reg)))
 #define WriteReg(reg, v) (*(Reg(reg)) = (v))
-
-#define MEMORY_FENCE() __sync_synchronize()
 
 #endif // CONSOLE_H

@@ -1,8 +1,8 @@
 #include <stdarg.h>
 
 #include "console.h"
-#include "defs.h"
 #include "lock.h"
+#include "log.h"
 
 static char digits[] = "0123456789abcdef";
 extern volatile int panicked;

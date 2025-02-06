@@ -1,6 +1,5 @@
 #include "lock.h"
-#include "riscv.h"
-#include "proc.h"
+
 #include "defs.h"
 
 void spinlock_init(spinlock_t *lk, char *name)

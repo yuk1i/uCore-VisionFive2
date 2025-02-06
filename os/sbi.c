@@ -1,6 +1,7 @@
 #include "sbi.h"
 #include "types.h"
-#include "defs.h"
+#include "riscv.h"
+
 const uint64 SBI_SET_TIMER = 0;
 const uint64 SBI_CONSOLE_PUTCHAR = 1;
 const uint64 SBI_CONSOLE_GETCHAR = 2;

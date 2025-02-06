@@ -1,6 +1,6 @@
-#include "defs.h"
 #include "proc.h"
-#include "const.h"
+#include "string.h"
+#include "log.h"
 
 static struct cpu cpus[NCPU];
 

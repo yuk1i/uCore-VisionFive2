@@ -1,8 +1,7 @@
 #include "kalloc.h"
-#include "defs.h"
-#include "riscv.h"
 
-extern char ekernel[];
+#include "defs.h"
+
 
 struct linklist {
 	struct linklist *next;

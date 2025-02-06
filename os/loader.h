@@ -1,7 +1,6 @@
 #ifndef LOADER_H
 #define LOADER_H
 
-#include "const.h"
 #include "proc.h"
 #include "types.h"
 
@@ -11,8 +10,7 @@ struct user_app *get_elf(char *name);
 int load_user_elf(struct user_app *, struct proc *);
 
 #define USTACK_START 0xffff0000
-#define USTACK_SIZE (PAGE_SIZE * 8)
-#define TRAP_PAGE_SIZE (PAGE_SIZE)
+#define USTACK_SIZE (PGSIZE * 8)
 
 struct user_app
 {

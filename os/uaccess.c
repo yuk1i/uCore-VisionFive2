@@ -1,7 +1,7 @@
 #include "vm.h"
-#include "defs.h"
 #include "riscv.h"
-
+#include "memlayout.h"
+#include "string.h"
 
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
