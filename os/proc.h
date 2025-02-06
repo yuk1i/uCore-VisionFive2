@@ -81,6 +81,7 @@ static inline struct proc *curr_proc() {
 
 // proc.c
 void proc_init();
+struct proc *allocproc();
 int fork();
 int exec(char *);
 int wait(int, int *);

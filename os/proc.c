@@ -13,6 +13,8 @@ static allocator_t proc_allocator;
 static spinlock_t pid_lock;
 static spinlock_t wait_lock;
 
+extern void sched_init();
+
 // initialize the proc table at boot time.
 void proc_init() {
     // we only init once.
@@ -70,7 +72,7 @@ static int allocpid() {
 // Look in the process table for an UNUSED proc.
 // If found, initialize state required to run in the kernel.
 // If there are no free procs, or a memory allocation fails, return 0.
-static struct proc *allocproc() {
+struct proc *allocproc() {
     struct proc *p;
     for (int i = 0; i < NPROC; i++) {
         p = pool[i];

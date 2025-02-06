@@ -3,6 +3,9 @@
 
 #include "types.h"
 
+// make the vscode language server happy
+#define asm __asm__
+
 // Supervisor Status Register, sstatus
 #define SSTATUS_SUM  (1L << 18)  // SUM (permit Supervisor User Memory access)
 #define SSTATUS_SPP  (1L << 8)   // Previous mode, 1=Supervisor, 0=User
