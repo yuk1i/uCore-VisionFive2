@@ -2,6 +2,7 @@
 
 #include "proc.h"
 #include "log.h"
+#include "defs.h"
 
 void init_queue(struct queue *q)
 {

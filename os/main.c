@@ -1,12 +1,12 @@
+#include "console.h"
 #include "debug.h"
 #include "defs.h"
 #include "kalloc.h"
 #include "loader.h"
 #include "plic.h"
-#include "timer.h"
+#include "proc.h"
 #include "sbi.h"
-#include "console.h"
-
+#include "timer.h"
 
 uint64 __pa kernel_image_end_4k;
 uint64 __pa kernel_image_end_2M;
@@ -16,73 +16,168 @@ static char relocate_pagetable_level1_ident[PGSIZE] __attribute__((aligned(PGSIZ
 static char relocate_pagetable_level1_direct_mapping[PGSIZE] __attribute__((aligned(PGSIZE)));
 static char relocate_pagetable_level1_high[PGSIZE] __attribute__((aligned(PGSIZE)));
 
-static void relocation_start();
-static void main_relocated();
-static void main_relocated2();
-static void secondary_main_relocated();
-static void secondary_main_relocated2();
+__attribute__((noreturn)) static void bootcpu_start_relocation();
+__attribute__((noreturn)) static void bootcpu_relocating();
+__attribute__((noreturn)) void secondarycpu_entry(int mhartid, int cpuid);
+__attribute__((noreturn)) static void secondarycpu_relocating();
 
-uint64 read_pc() {
-    uint64 pc;
-    asm volatile("auipc %0, 0\n"  // 将当前 PC 存入寄存器
-                 : "=r"(pc)       // 输出到变量 pc
-                 :                // 无输入
-                 :                // 无额外寄存器约束
-    );
-    return pc;
-}
+static void bootcpu_init();
+static void secondarycpu_init();
 
-void main(int mhartid) {
-    w_tp(mhartid);
+static volatile int booted_count       = 0;
+static volatile int halt_specific_init = 0;
 
+/** Multiple CPU (SMP) Boot Process:
+ * ------------
+ * | Boot CPU |  cpuid = 0, m_hartid = random
+ * ------------
+ *      | OpenSBI
+ * -------------------------
+ * | _entry, bootcpu_entry |
+ * -------------------------
+ *      | sp <= boot_stack (PA)
+ * ----------------------------
+ * | bootcpu_start_relocation |
+ * ----------------------------
+ *      | satp <= relocate_pagetable
+ *      | sp   <= boot_stack (KIVA)
+ * ----------------------
+ * | bootcpu_relocating |
+ * ----------------------
+ *      | kvm_init : setup kernel_pagetable
+ *      |
+ *      | satp <= kernel_pagetable
+ *      | sp   <= percpu_sched_stack (KVA)
+ * ----------------
+ * | bootcpu_init |
+ * ----------------
+ *    |                                             ------------------------
+ *    | OpenSBI: HSM_Hart_Start         ------->    | _entry_secondary_cpu |
+ *    |                                             ------------------------
+ *    |                                                     | sp <= boot_stack (PA)
+ *    |                                             ----------------------
+ *    |                                             | secondarycpu_entry |
+ *    |                                             ----------------------
+ *    |                                                     | satp <= relocate_pagetable
+ *    |                                                     | sp   <= boot_stack (KIVA)
+ *    |                                             ---------------------------
+ *    |                                             | secondarycpu_relocating |
+ *    |                                             ---------------------------
+ *    |                                                     | satp <= kernel_pagetable
+ *    |                                                     | sp   <= percpu_sched_stack (KVA)
+ *    | wait for all cpu online                     ---------------------
+ *    |                                             | secondarycpu_init |
+ *    | platform level init :                       ---------------------
+ *    |   console, plic, kpgmgr,                            | wait for `halt_specific_init`
+ *    |   uvm, proc, loader                                 |
+ *    |                                                     |
+ *    | halt_init: trap, timer, plic_hart                   | halt_init: trap, timer, plic_hart
+ *    |                                                     |
+ * -------------                                    -------------
+ * | scheduler |                                    | scheduler |
+ * -------------                                    -------------
+ */
+
+void bootcpu_entry(int mhartid) {
     printf("\n\n=====\nHello World!\n=====\n\nBoot stack: %p\nclean bss: %p - %p\n", boot_stack, s_bss, e_bss);
     memset(s_bss, 0, e_bss - s_bss);
-    printf("Boot cpuid 0, mhartid %d\n", mhartid);
-    smp_init(mhartid);
+
+    printf("Boot m_hartid %d\n", mhartid);
+
+    // the boot hart always has cpuid == 0
+    w_tp(0);
+    // after setup tp, we can use mycpu()
+    mycpu()->cpuid    = 0;
+    mycpu()->mhart_id = mhartid;
+
+    // functions in log.h requres mycpu() to be initialized.
+
     infof("basic smp inited, thread_id available now, we are cpu %d: %p", mhartid, mycpu());
 
-    printf("Kernel is Relocating...\n");
-    relocation_start();
+    printf("Kernel Starts Relocating...\n");
+    bootcpu_start_relocation();
 
     // We will jump to kernel's real pagetable in relocation_start.
     __builtin_unreachable();
 }
 
-static void main_relocated() {
-    printf("Boot HART Relocated. We are at high address now! PC: %p\n", read_pc());
+__attribute__((noreturn)) static void bootcpu_relocating() {
+    printf("Boot HART Relocated. We are at high address now! PC: %p\n", r_pc());
 
     // Step 4. Rebuild final kernel pagetable
     kvm_init();
-    // vm_print(SATP_TO_PGTABLE(r_satp()));
 
     uint64 new_sp = mycpu()->sched_kstack_top;
+    uint64 fn     = (uint64)&bootcpu_init;
+
+    asm volatile("mv a1, %0" ::"r"(fn));
     asm volatile("mv sp, %0" ::"r"(new_sp));
-    main_relocated2();
+    asm volatile("jr a1");
+    __builtin_unreachable();
 }
 
-static volatile int booted_count       = 0;
-static volatile int halt_specific_init = 0;
+__attribute__((noreturn)) void secondarycpu_entry(int hartid, int cpuid) {
+    printf("cpu %d (halt %d) booting. Relocating\n", cpuid, hartid);
 
-static void main_relocated2() {
+    // init mycpu()
+    w_tp(cpuid);
+    getcpu(cpuid)->mhart_id = hartid;
+    getcpu(cpuid)->cpuid    = cpuid;
+
+    // switch to temporary pagetable.
+    w_satp(MAKE_SATP(relocate_pagetable));
+    sfence_vma();
+
+    // jump to kernel's high address
+    uint64 fn = (uint64)&secondarycpu_relocating + KERNEL_OFFSET;
+    uint64 sp = (uint64)&boot_stack_top + KERNEL_OFFSET;
+
+    asm volatile("mv a1, %0\n" ::"r"(fn));
+    asm volatile("mv sp, %0\n" ::"r"(sp));
+    asm volatile("jr a1");
+    __builtin_unreachable();
+}
+
+__attribute__((noreturn)) static void secondarycpu_relocating() {
+    extern pagetable_t kernel_pagetable;
+    w_satp(MAKE_SATP(KVA_TO_PA(kernel_pagetable)));
+
+    uint64 sp = mycpu()->sched_kstack_top;
+    uint64 fn = (uint64)&secondarycpu_init;
+
+    asm volatile("mv a1, %0" ::"r"(fn));
+    asm volatile("mv sp, %0" ::"r"(sp));
+    asm volatile("jr a1");
+    __builtin_unreachable();
+}
+
+static void bootcpu_init() {
     printf("Relocated. Boot halt sp at %p\n", r_sp());
 
 #ifdef ENABLE_SMP
     printf("Boot another cpus.\n");
 
-    for (int i = 0; i < NCPU; i++) {
-        if (i == mycpu()->mhart_id)
-            continue;
-        printf("- booting hart %d", i);
-        int booted_cnt = booted_count;
+    // Attention: OpenSBI does not guarantee the boot cpu has mhartid == 0.
+    // We assume NCPU == the number of cpus in the system, although spec does not guarantee this.
+    {
+        int cpuid = 1;
+        for (int hartid = 0; hartid < NCPU; hartid++) {
+            if (hartid == mycpu()->mhart_id)
+                continue;
 
-        int ret = sbi_hsm_hart_start(i, KIVA_TO_PA(secondary_cpu_entry), 0x114514);
-        printf(" = %d. waiting for hart online\n", ret);
-        if (ret < 0) {
-            printf("skipped for hart %d\n", i);
-            break;
+            int saved_booted_cnt = booted_count;
+
+            printf("- booting hart %d: hsm_hart_start(hartid=%d, pc=_entry_sec, opaque=%d)", hartid, hartid, cpuid);
+            int ret = sbi_hsm_hart_start(hartid, KIVA_TO_PA(_entry_secondary_cpu), cpuid);
+            printf(" = %d. waiting for hart online\n", ret);
+            if (ret < 0) {
+                printf("skipped for hart %d\n", hartid);
+                continue;
+            }
+            while (booted_count == saved_booted_cnt);
+            cpuid++;
         }
-
-        while (booted_count == booted_cnt);
+        printf("System has %d cpus online\n\n", cpuid);
     }
 #endif
 
@@ -108,54 +203,28 @@ static void main_relocated2() {
     halt_specific_init = 1;
     MEMORY_FENCE();
 
-    infof("start scheduler!", mycpu()->mhart_id);
+    infof("start scheduler!");
     scheduler();
+
+    assert("scheduler returns");
 }
 
-void secondary_main_pa(int hartid) {
-    printf("halt %d booting. Relocating\n", hartid);
-
-    // init mycpu()
-    w_tp(hartid);
-    getcpu(hartid)->mhart_id = hartid;
-
-    // switch to temporary pagetable.
-    w_satp(MAKE_SATP(relocate_pagetable));
-    sfence_vma();
-
-    // jump to kernel's high address
-    uint64 fn = (uint64)&secondary_main_relocated + KERNEL_OFFSET;
-
-    asm volatile("mv a1, %0\n" ::"r"(fn));
-    asm volatile("la sp, boot_stack_top");
-    asm volatile("add sp, sp, %0" ::"r"(KERNEL_OFFSET));
-    asm volatile("jr a1");
-
-    __builtin_unreachable();
-}
-
-static void secondary_main_relocated() {
-    extern pagetable_t kernel_pagetable;
-    w_satp(MAKE_SATP(KVA_TO_PA(kernel_pagetable)));
-
-    uint64 new_sp = mycpu()->sched_kstack_top;
-    asm volatile("mv sp, %0" ::"r"(new_sp));
-    secondary_main_relocated2();
-}
-
-static void secondary_main_relocated2() {
-    printf("halt %d booted. sp: %p\n", mycpu()->mhart_id, r_sp());
+static void secondarycpu_init() {
+    printf("cpu %d (halt %d) booted. sp: %p\n", mycpu()->cpuid, mycpu()->mhart_id, r_sp());
     booted_count++;
     while (!halt_specific_init);
 
     trap_init();
     timer_init();
     plicinithart();
-    infof("start scheduler!", mycpu()->mhart_id);
+
+    infof("start scheduler!");
     scheduler();
+
+    assert("scheduler returns");
 }
 
-static void relocation_start() {
+__attribute__((noreturn)) static void bootcpu_start_relocation() {
     assert(IS_ALIGNED(KERNEL_PHYS_BASE, PGSIZE_2M));
     // Although the kernel is compiled against VMA 0xffffffff80200000,
     //  we are still running under the Physical Address 0x80200000.
@@ -241,12 +310,11 @@ static void relocation_start() {
     w_satp(MAKE_SATP(pgt_root));
     sfence_vma();
 
-    uint64 jump   = (uint64)&main_relocated + KERNEL_OFFSET;
-    uint64 new_sp = (uint64)&boot_stack_top + KERNEL_OFFSET;
+    uint64 fn = (uint64)&bootcpu_relocating + KERNEL_OFFSET;
+    uint64 sp = (uint64)&boot_stack_top + KERNEL_OFFSET;
 
-    asm volatile("mv a1, %0\n" ::"r"(jump));
-    asm volatile("la sp, boot_stack_top");
-    asm volatile("add sp, sp, %0" ::"r"(KERNEL_OFFSET));
+    asm volatile("mv a1, %0\n" ::"r"(fn));
+    asm volatile("mv sp, %0\n" ::"r"(sp));
     asm volatile("jr a1");
-    // jump();
+    __builtin_unreachable();
 }

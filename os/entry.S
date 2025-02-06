@@ -2,15 +2,15 @@
     .globl _entry
 _entry:
     lla sp, boot_stack_top
-    call main
+    call bootcpu_entry
 
-.globl secondary_cpu_entry
-secondary_cpu_entry:
+.globl _entry_secondary_cpu
+_entry_secondary_cpu:
     # RISC-V SBI Spec: Ch.9 Hart State Management Extension
     #    sbi_hart_start: a0: hartid, a1: opaque
     fence.i
     la sp, boot_stack_top
-    call secondary_main_pa
+    call secondarycpu_entry
 
 
     .globl kernel_trap_entry

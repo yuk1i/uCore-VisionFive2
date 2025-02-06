@@ -162,6 +162,12 @@ static inline uint64 r_ra() {
     return x;
 }
 
+static inline uint64 r_pc() {
+    uint64 pc;
+    asm volatile("auipc %0, 0" : "=r"(pc));
+    return pc;
+}
+
 // flush the TLB.
 static inline void sfence_vma() {
     // the zero, zero means flush all TLB entries.

@@ -37,7 +37,7 @@ extern char s_bss[], e_bss[];
 
 // entry.S
 extern char _entry[];
-extern char secondary_cpu_entry[];
+extern char _entry_secondary_cpu[];
 extern char kernel_trap_entry[];
 extern char boot_stack[], boot_stack_top[];
 
