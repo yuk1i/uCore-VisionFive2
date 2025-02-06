@@ -80,7 +80,6 @@ void *__pa kallocpage()
 
 // Object Allocator
 static uint64 allocator_mapped_va = KERNEL_ALLOCATOR_BASE;
-extern pagetable_t kernel_pagetable;
 
 static inline void bit_set(uint8 *bitmap, uint64 index)
 {

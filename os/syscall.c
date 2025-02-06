@@ -21,7 +21,7 @@ uint64 sys_read(int fd, uint64 va, uint64 len) {
     return user_console_read(va, len);
 }
 
-__attribute__((noreturn)) void sys_exit(int code) {
+__noreturn void sys_exit(int code) {
     exit(code);
     __builtin_unreachable();
 }

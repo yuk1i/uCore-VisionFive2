@@ -3,6 +3,7 @@
 #include "console.h"
 #include "lock.h"
 #include "log.h"
+#include "defs.h"
 
 static char digits[] = "0123456789abcdef";
 extern volatile int panicked;
@@ -96,7 +97,7 @@ void printf(char *fmt, ...) {
         intr_on();
 }
 
-__attribute__((noreturn)) void __panic(char *fmt, ...) {
+__noreturn void __panic(char *fmt, ...) {
     va_list ap;
 
     panicked = 1;

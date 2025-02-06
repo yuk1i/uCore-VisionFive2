@@ -1,6 +1,5 @@
-#include "vm.h"
-
 #include "defs.h"
+#include "vm.h"
 
 pagetable_t kernel_pagetable;
 static uint64 __kva init_page_allocator;
@@ -92,6 +91,7 @@ static pagetable_t kvmmake() {
         }
         c->sched_kstack_top = sched_stack + KERNEL_STACK_SIZE;
         // double the sched_stack to make a significant gap between different cpus.
+        //  if any kernel stack overflows, it will page fault.
         sched_stack += 2 * KERNEL_STACK_SIZE;
     }
 

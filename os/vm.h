@@ -21,6 +21,7 @@
 
 extern uint64 __pa kernel_image_end_4k;
 extern uint64 __pa kernel_image_end_2M;
+extern pagetable_t kernel_pagetable;
 
 struct kernelmap {
     uint32 valid;

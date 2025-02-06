@@ -4,7 +4,6 @@
 #include "printf.h"
 #include "proc.h"
 
-extern int threadid();
 extern void dummy(int, ...);
 extern void shutdown() __attribute__((noreturn));
 

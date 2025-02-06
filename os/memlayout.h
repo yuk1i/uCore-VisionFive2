@@ -7,7 +7,6 @@
 // Kernel Memory Layout:
 
 #define RISCV_DDR_BASE      0x80000000ull
-#define PHYS_MEM_SIZE       (64ull * 1024 * 1024)
 #define VALID_PHYS_ADDR(pa) (((pa) >= KERNEL_PHYS_BASE && (pa) <= RISCV_DDR_BASE + PHYS_MEM_SIZE))
 
 /**

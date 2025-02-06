@@ -71,27 +71,33 @@ static inline int cpuid() {
     return r_tp();
 }
 
-void smp_init(uint64 boot_hartid);
+// cpu.c
 struct cpu *mycpu();
 struct cpu *getcpu(int i);
-struct proc *curr_proc();
 
-void exit(int);
+static inline struct proc *curr_proc() {
+    return mycpu()->proc;
+}
+
+// proc.c
 void proc_init();
-void scheduler() __attribute__((noreturn));
-void sched();
-void yield();
-void sleep(void *chan, spinlock_t *lk);
-void wakeup(void *chan);
 int fork();
 int exec(char *);
 int wait(int, int *);
+void exit(int);
+int growproc(int n);
+
+void sleep(void *chan, spinlock_t *lk);
+void wakeup(void *chan);
+
+// sched.c
+void scheduler() __attribute__((noreturn));
+void sched();
+void yield();
 void add_task(struct proc *);
-struct proc *allocproc();
 
 // swtch.S
 void swtch(struct context *, struct context *);
 
-int growproc(int n);
 
 #endif  // PROC_H

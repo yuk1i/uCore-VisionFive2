@@ -16,10 +16,10 @@ static char relocate_pagetable_level1_ident[PGSIZE] __attribute__((aligned(PGSIZ
 static char relocate_pagetable_level1_direct_mapping[PGSIZE] __attribute__((aligned(PGSIZE)));
 static char relocate_pagetable_level1_high[PGSIZE] __attribute__((aligned(PGSIZE)));
 
-__attribute__((noreturn)) static void bootcpu_start_relocation();
-__attribute__((noreturn)) static void bootcpu_relocating();
-__attribute__((noreturn)) void secondarycpu_entry(int mhartid, int cpuid);
-__attribute__((noreturn)) static void secondarycpu_relocating();
+__noreturn static void bootcpu_start_relocation();
+__noreturn static void bootcpu_relocating();
+__noreturn void secondarycpu_entry(int mhartid, int cpuid);
+__noreturn static void secondarycpu_relocating();
 
 static void bootcpu_init();
 static void secondarycpu_init();
@@ -101,7 +101,7 @@ void bootcpu_entry(int mhartid) {
     __builtin_unreachable();
 }
 
-__attribute__((noreturn)) static void bootcpu_relocating() {
+__noreturn static void bootcpu_relocating() {
     printf("Boot HART Relocated. We are at high address now! PC: %p\n", r_pc());
 
     // Step 4. Rebuild final kernel pagetable
@@ -116,7 +116,7 @@ __attribute__((noreturn)) static void bootcpu_relocating() {
     __builtin_unreachable();
 }
 
-__attribute__((noreturn)) void secondarycpu_entry(int hartid, int cpuid) {
+__noreturn void secondarycpu_entry(int hartid, int cpuid) {
     printf("cpu %d (halt %d) booting. Relocating\n", cpuid, hartid);
 
     // init mycpu()
@@ -138,8 +138,7 @@ __attribute__((noreturn)) void secondarycpu_entry(int hartid, int cpuid) {
     __builtin_unreachable();
 }
 
-__attribute__((noreturn)) static void secondarycpu_relocating() {
-    extern pagetable_t kernel_pagetable;
+__noreturn static void secondarycpu_relocating() {
     w_satp(MAKE_SATP(KVA_TO_PA(kernel_pagetable)));
 
     uint64 sp = mycpu()->sched_kstack_top;
@@ -224,7 +223,7 @@ static void secondarycpu_init() {
     assert("scheduler returns");
 }
 
-__attribute__((noreturn)) static void bootcpu_start_relocation() {
+__noreturn static void bootcpu_start_relocation() {
     assert(IS_ALIGNED(KERNEL_PHYS_BASE, PGSIZE_2M));
     // Although the kernel is compiled against VMA 0xffffffff80200000,
     //  we are still running under the Physical Address 0x80200000.
