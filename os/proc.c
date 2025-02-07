@@ -1,10 +1,9 @@
 #include "proc.h"
 
 #include "defs.h"
+#include "kalloc.h"
 #include "queue.h"
 #include "trap.h"
-#include "kalloc.h"
-#include "loader.h"
 
 struct proc *pool[NPROC];
 static struct proc *init_proc;
@@ -28,8 +27,6 @@ void proc_init() {
     allocator_init(&proc_allocator, "proc", sizeof(struct proc), NPROC);
     struct proc *p;
 
-    uint64 proc_kstack = KERNEL_STACK_PROCS;
-
     for (int i = 0; i < NPROC; i++) {
         p = kalloc(&proc_allocator);
         memset(p, 0, sizeof(*p));
@@ -37,36 +34,45 @@ void proc_init() {
         p->index = i;
         p->state = UNUSED;
 
-        p->kstack = proc_kstack;
-        for (uint64 va = proc_kstack; va < proc_kstack + KERNEL_STACK_SIZE; va += PGSIZE) {
-            uint64 __pa newpg = (uint64)kallocpage();
-            kvmmap(kernel_pagetable, va, newpg, PGSIZE, PTE_A | PTE_D | PTE_R | PTE_W);
-        }
-        sfence_vma();
-        proc_kstack += 2 * KERNEL_STACK_SIZE;
+        p->kstack = (uint64)kallocpage();
+        assert(p->kstack);
 
-        p->trapframe = (struct trapframe *)PA_TO_KVA(kallocpage());
-        pool[i]      = p;
+        pool[i] = p;
     }
     sched_init();
-
-    init_proc = pool[0];
 }
 
 static int allocpid() {
     static int PID = 1;
-    int retpid = -1;
-    
+    int retpid     = -1;
+
     acquire(&pid_lock);
     retpid = PID++;
     release(&pid_lock);
 
     return retpid;
 }
- static void first_sched_ret(void) {
+
+static void first_sched_ret() {
+    // s0: frame pointer, s1: fn, s2: uint64 arg
+    //  they are callee saved registers, so we do not need to save them.
     release(&curr_proc()->lock);
-    intr_off();
-    usertrapret();
+    intr_on();
+    asm volatile("mv a0, s2");
+    asm volatile("jalr s1");
+    panic("first_sched_ret should never return. You should use exit to terminate kthread");
+}
+
+struct proc *create_kthread(uint64 fn, uint64 arg) {
+    struct proc *p = allocproc();
+    if (!p)
+        return NULL;
+
+    p->context.s1 = fn;
+    p->context.s2 = arg;
+    p->state = RUNNABLE;
+
+    return p;
 }
 
 // Look in the process table for an UNUSED proc.
@@ -87,27 +93,19 @@ struct proc *allocproc() {
 found:
     // initialize a proc
     tracef("init proc %p", p);
-    p->pid   = allocpid();
-    p->state = USED;
-    p->mm    = mm_create();
-    if (!p->mm)
-        panic("mm");
-    p->vma_ustack = NULL;
-    p->vma_brk    = NULL;
-    // only allocate trampoline and trapframe here.
-    p->vma_trampoline = mm_mappagesat(p->mm, TRAMPOLINE, KIVA_TO_PA(trampoline), PTE_A | PTE_R | PTE_X, false);
-    uint64 __pa tf    = (uint64)kallocpage();
-    if (!tf)
-        panic("tf");
-    p->vma_trapframe = mm_mappagesat(p->mm, TRAPFRAME, tf, PTE_A | PTE_D | PTE_R | PTE_W | PTE_X, false);
-    p->trapframe     = (struct trapframe *)PA_TO_KVA(tf);
-    p->parent        = NULL;
-    p->exit_code     = 0;
+    p->pid        = allocpid();
+    p->state      = USED;
+    p->killed     = 0;
+    p->sleep_chan = NULL;
+    p->parent     = NULL;
+    p->exit_code  = 0;
     memset(&p->context, 0, sizeof(p->context));
-    memset((void *)p->kstack, 0, KERNEL_STACK_SIZE);
-    memset((void *)p->trapframe, 0, PGSIZE);
+    memset((void *)p->kstack, 0, PGSIZE);
     p->context.ra = (uint64)first_sched_ret;
-    p->context.sp = p->kstack + KERNEL_STACK_SIZE;
+    p->context.sp = p->kstack + PGSIZE;
+
+    if (!init_proc)
+        init_proc = p;
 
     assert(holding(&p->lock));
     return p;
@@ -122,14 +120,6 @@ static void freeproc(struct proc *p) {
     p->sleep_chan = NULL;
     p->killed     = 0;
     p->parent     = NULL;
-
-    freevma(p->vma_trampoline, false);
-    freevma(p->vma_trapframe, true);
-    p->vma_trampoline = NULL;
-    p->vma_trapframe  = NULL;
-    mm_free(p->mm);
-    p->vma_brk    = NULL;
-    p->vma_ustack = NULL;
 }
 
 void sleep(void *chan, spinlock_t *lk) {
@@ -169,53 +159,6 @@ void wakeup(void *chan) {
         }
         release(&p->lock);
     }
-}
-
-int fork() {
-    struct proc *np;
-    // Allocate process.
-    if ((np = allocproc()) == NULL) {
-        panic("allocproc");
-    }
-
-    struct proc *p = curr_proc();
-    acquire(&p->lock);
-
-    // Copy user memory from parent to child.
-    if (mm_copy(p->mm, np->mm))
-        panic("mm_copy");
-
-    // copy saved user registers.
-    *(np->trapframe) = *(p->trapframe);
-
-    // Cause fork to return 0 in the child.
-    np->trapframe->a0 = 0;
-    np->parent        = p;
-    np->state         = RUNNABLE;
-    add_task(np);
-    release(&np->lock);
-    release(&p->lock);
-
-    return np->pid;
-}
-
-int exec(char *name) {
-    struct user_app *app = get_elf(name);
-    if (app == NULL)
-        return -1;
-    struct proc *p = curr_proc();
-
-    acquire(&p->lock);
-
-    // execve does not preserve memory mappings:
-    //  free memory below program_brk, and ustack
-    //  but keep trapframe and trampoline, because it belongs to curr_proc().
-    mm_free_pages(p->mm);
-
-    load_user_elf(app, p);
-
-    release(&p->lock);
-    return 0;
 }
 
 int wait(int pid, int *code) {
@@ -266,6 +209,9 @@ int wait(int pid, int *code) {
 void exit(int code) {
     struct proc *p = curr_proc();
 
+    if (p == init_proc)
+        panic("initproc exiting");
+
     acquire(&wait_lock);
 
     // wakeup wait-ing parent.
@@ -292,12 +238,4 @@ void exit(int code) {
 
     sched();
     panic("exit should never return");
-}
-
-// Grow or shrink user memory by n bytes.
-// Return 0 on succness, -1 on failure.
-int growproc(int n) {
-    uint64 program_brk;
-    panic("qwq");
-    return 0;
 }

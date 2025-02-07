@@ -1,6 +1,5 @@
 #include "defs.h"
 #include "kalloc.h"
-#include "loader.h"
 #include "proc.h"
 #include "queue.h"
 #include "trap.h"
@@ -79,7 +78,7 @@ void scheduler() {
 
         acquire(&p->lock);
         assert(p->state == RUNNABLE);
-        infof("switch to proc %d(%d)", p->index, p->pid);
+        debugf("switch to proc %d(%d)", p->index, p->pid);
         p->state = RUNNING;
         c->proc  = p;
         swtch(&c->sched_context, &p->context);
